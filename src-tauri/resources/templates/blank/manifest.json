@@ -1,0 +1,9 @@
+{
+  "id": "__ID__",
+  "name": "__NAME__",
+  "version": "0.1.0",
+  "description": "新建的工具",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

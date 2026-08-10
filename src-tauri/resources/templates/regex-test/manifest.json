@@ -1,0 +1,9 @@
+{
+  "id": "__ID__",
+  "name": "__NAME__",
+  "version": "1.0.0",
+  "description": "正则表达式在线测试",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

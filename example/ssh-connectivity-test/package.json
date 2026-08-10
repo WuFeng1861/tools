@@ -1,0 +1,9 @@
+{
+  "name": "ssh-connectivity-test",
+  "version": "0.1.0",
+  "private": true,
+  "main": "app.js",
+  "dependencies": {
+    "ssh2": "^1.17.0"
+  }
+}

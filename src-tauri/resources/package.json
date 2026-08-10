@@ -1,0 +1,6 @@
+{
+  "name": "tool-platform-runtime-resources",
+  "private": true,
+  "type": "commonjs",
+  "description": "Tauri 打包资源（host / runtime / npm）。标记 CommonJS，避免被上层 package.json 的 type:module 影响。"
+}

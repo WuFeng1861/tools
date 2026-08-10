@@ -1,0 +1,9 @@
+{
+  "id": "__ID__",
+  "name": "__NAME__",
+  "version": "1.0.0",
+  "description": "JSON 格式化 / 校验 / 压缩",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

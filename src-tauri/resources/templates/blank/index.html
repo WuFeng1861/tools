@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>__NAME__</title>
+  <style>
+    body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 32px; color: #1f2329; }
+    button { padding: 7px 16px; cursor: pointer; }
+    pre { background: #f5f6f8; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <h1>__NAME__</h1>
+  <p>这是工具界面。修改 <code>index.html</code>（界面）与 <code>app.js</code>（后端）来打造你的工具。</p>
+  <button onclick="ping()">ping 后端</button>
+  <pre id="out"></pre>
+  <script>
+    async function ping() {
+      const r = await fetch("/api/ping");
+      document.getElementById("out").textContent = JSON.stringify(await r.json(), null, 2);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SSH 连通性测试</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div class="logo" aria-hidden="true">
+          <span class="logo-prompt">&gt;</span><span class="logo-cursor"></span>
+        </div>
+        <div>
+          <h1>SSH 连通性测试</h1>
+          <p class="subtitle">填写连接信息，验证 SSH 服务是否可达并可登录</p>
+        </div>
+      </header>
+
+      <section class="card history-card">
+        <div class="history-head">
+          <h2 class="history-title">历史记录</h2>
+          <div class="history-actions">
+            <button type="button" id="btn-save-history" class="btn-ghost" title="把当前表单保存为一条历史记录">保存当前</button>
+            <button type="button" id="btn-clear-history" class="btn-ghost danger" title="清空全部历史记录">清空</button>
+          </div>
+        </div>
+        <div id="history-empty" class="history-empty">还没有历史记录。测试后点「保存当前」，下次点条目即可一键填充所有数据。</div>
+        <ul id="history-list" class="history-list"></ul>
+        <p class="history-note">点击条目自动填充表单；「更新」用当前表单覆盖该条；记录保存在工具目录 history.json（含密码，注意本机安全）。</p>
+      </section>
+
+      <section class="card">
+        <form id="test-form" novalidate>
+          <div class="grid">
+            <div class="field">
+              <label for="host">主机地址 <span class="req">*</span></label>
+              <input
+                type="text"
+                id="host"
+                name="host"
+                required
+                placeholder="例如 192.168.1.100 或 example.com"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+
+            <div class="field field-port">
+              <label for="port">端口</label>
+              <input type="number" id="port" name="port" value="22" min="1" max="65535" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="username">用户名 <span class="req">*</span></label>
+            <input
+              type="text"
+              id="username"
+              name="username"
+              required
+              placeholder="例如 root"
+              autocomplete="username"
+              spellcheck="false"
+            />
+          </div>
+
+          <div class="field">
+            <label>认证方式</label>
+            <div class="radio-group">
+              <label class="radio">
+                <input type="radio" name="auth-method" value="password" checked />
+                <span>密码</span>
+              </label>
+              <label class="radio">
+                <input type="radio" name="auth-method" value="key" />
+                <span>私钥</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="password-field" class="field">
+            <label for="password">密码 <span class="req">*</span></label>
+            <div class="input-with-toggle">
+              <input
+                type="password"
+                id="password"
+                name="password"
+                placeholder="SSH 登录密码"
+                autocomplete="current-password"
+              />
+              <button type="button" id="toggle-password" class="btn-toggle" title="显示/隐藏密码">
+                显示
+              </button>
+            </div>
+          </div>
+
+          <div id="key-fields" class="hidden">
+            <div class="field">
+              <label for="key-path">私钥文件 <span class="req">*</span></label>
+              <div class="input-with-toggle">
+                <input
+                  type="text"
+                  id="key-path"
+                  name="key-path"
+                  placeholder="绝对路径，或工具目录相对路径，如 id_rsa"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button type="button" id="btn-pick-key" class="btn-toggle" title="浏览工具目录下的私钥文件">
+                  浏览…
+                </button>
+              </div>
+              <div id="key-picker" class="key-picker hidden"></div>
+            </div>
+            <div class="field">
+              <label for="key-passphrase">私钥口令（可选）</label>
+              <input
+                type="password"
+                id="key-passphrase"
+                name="key-passphrase"
+                placeholder="私钥已加密时填写"
+                autocomplete="off"
+              />
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="field">
+              <label class="check">
+                <input type="checkbox" id="verify-login" checked />
+                <span>验证登录（勾选后会校验密码/密钥是否正确）</span>
+              </label>
+            </div>
+            <div class="field field-timeout">
+              <label for="timeout">超时（秒）</label>
+              <input type="number" id="timeout" name="timeout" value="10" min="1" max="120" />
+            </div>
+          </div>
+
+          <button type="submit" id="btn-test" class="btn-primary">
+            <span class="btn-label">开始测试</span>
+          </button>
+        </form>
+      </section>
+
+      <section id="result" class="card result-card hidden" aria-live="polite">
+        <div id="result-badge" class="result-badge"></div>
+        <h2 id="result-title"></h2>
+        <p id="result-reason"></p>
+        <ol id="result-steps" class="steps"></ol>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden" aria-live="polite"></div>
+
+    <script src="/front.js"></script>
+  </body>
+</html>

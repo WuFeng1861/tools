@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>__NAME__</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 24px; color: #1f2329; }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    label { font-size: 13px; color: #6b7280; display: block; margin: 10px 0 4px; }
+    input, textarea { width: 100%; font-family: Consolas, Menlo, monospace; font-size: 13px; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+    input { height: 34px; }
+    textarea { height: 120px; }
+    .row { display: flex; gap: 8px; }
+    button { padding: 7px 16px; cursor: pointer; margin-top: 10px; }
+    .out { margin-top: 12px; white-space: pre-wrap; background: #f5f6f8; padding: 12px; border-radius: 8px; font-family: Consolas, Menlo, monospace; font-size: 13px; }
+    .hl { background: #ffe08a; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <h1>__NAME__</h1>
+  <div class="row">
+    <div style="flex: 2;">
+      <label>正则表达式</label>
+      <input id="pattern" placeholder="\d+" />
+    </div>
+    <div style="flex: 1;">
+      <label>标志</label>
+      <input id="flags" placeholder="g" value="g" />
+    </div>
+  </div>
+  <label>测试文本</label>
+  <textarea id="text" placeholder="在这里输入要匹配的文本"></textarea>
+  <button onclick="run()">测试</button>
+  <div id="out" class="out">匹配结果将显示在这里</div>
+  <script>
+    async function run() {
+      const r = await fetch("/api/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pattern: document.getElementById("pattern").value,
+          flags: document.getElementById("flags").value,
+          text: document.getElementById("text").value,
+        }),
+      });
+      const d = await r.json();
+      const out = document.getElementById("out");
+      if (!d.ok) {
+        out.textContent = "正则错误：" + d.error;
+        return;
+      }
+      if (!d.matches.length) {
+        out.textContent = "未匹配";
+        return;
+      }
+      out.textContent = `共 ${d.count} 处匹配：\n\n` +
+        d.matches.map((m, i) => `#${i + 1} 位置 ${m.index}: ${m.match}`).join("\n");
+    }
+  </script>
+</body>
+</html>

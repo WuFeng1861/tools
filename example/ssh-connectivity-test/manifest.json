@@ -1,0 +1,9 @@
+{
+  "id": "ssh-connectivity-test",
+  "name": "SSH 连通性测试",
+  "version": "0.1.0",
+  "description": "填写 SSH 连接信息，分阶段测试 TCP 连通、SSH 握手与登录认证",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

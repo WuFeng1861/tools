@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>__NAME__</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, "Microsoft YaHei", sans-serif; margin: 24px; color: #1f2329; }
+    h1 { margin: 0 0 12px; font-size: 20px; }
+    .row { display: flex; gap: 8px; margin-bottom: 10px; }
+    button { padding: 7px 16px; cursor: pointer; }
+    textarea { width: 100%; height: 200px; font-family: Consolas, Menlo, monospace; font-size: 13px; padding: 10px; border: 1px solid #ccc; border-radius: 8px; }
+    .out { margin-top: 12px; white-space: pre-wrap; background: #f5f6f8; padding: 12px; border-radius: 8px; font-family: Consolas, Menlo, monospace; font-size: 13px; min-height: 80px; }
+    .err { color: #e5484d; }
+  </style>
+</head>
+<body>
+  <h1>__NAME__</h1>
+  <div class="row">
+    <button onclick="process('format')">格式化</button>
+    <button onclick="process('validate')">校验</button>
+    <button onclick="process('minify')">压缩</button>
+  </div>
+  <textarea id="input" placeholder='粘贴 JSON 到这里，例如：{"a":1,"b":[1,2]}'></textarea>
+  <div id="out" class="out">结果将显示在这里</div>
+  <script>
+    async function process(action) {
+      const json = document.getElementById("input").value;
+      const r = await fetch("/api/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, json }),
+      });
+      const d = await r.json();
+      const out = document.getElementById("out");
+      if (d.ok) {
+        out.className = "out";
+        out.textContent = d.result;
+      } else {
+        out.className = "out err";
+        out.textContent = "JSON 错误：" + d.error;
+      }
+    }
+  </script>
+</body>
+</html>
