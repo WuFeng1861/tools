@@ -307,6 +307,112 @@ pub async fn write_tool_file(
     fs::write(&full, content).map_err(|e| format!("写入 {path} 失败: {e}"))
 }
 
+/// 校验「待创建文件」的相对路径是否合法（不穿越、非隐藏/保留名），
+/// 父目录不存在时自动创建，最后做越界校验，返回完整路径。
+fn validate_new_file_path(data_dir: &Path, id: &str, rel: &str) -> Result<PathBuf, String> {
+    if !regex_id(id) {
+        return Err("非法的工具 id".into());
+    }
+    let rel = rel.trim();
+    if rel.is_empty() {
+        return Err("文件名不能为空".into());
+    }
+    if rel.ends_with('/') {
+        return Err("文件名不能以 / 结尾".into());
+    }
+    if rel.contains("..") || Path::new(rel).is_absolute() || rel.contains('\\') {
+        return Err("非法的相对路径".into());
+    }
+    // 最后一段不允许是隐藏文件 / 平台保留目录
+    let last = rel.rsplit('/').next().unwrap_or(rel);
+    if last.starts_with('.') || last.starts_with('_') || last == "node_modules" {
+        return Err(format!("不允许创建该文件名：{last}"));
+    }
+    // Windows 文件名非法字符
+    if rel.chars().any(|c| matches!(c, ':' | '?' | '*' | '"' | '<' | '>' | '|')) {
+        return Err("文件名包含非法字符（: ? * \" < > |）".into());
+    }
+
+    let tool_dir = data_dir.join("toolbox").join(id);
+    if !tool_dir.exists() {
+        return Err(format!("工具 {id} 不存在"));
+    }
+    let full = tool_dir.join(rel);
+    if full.exists() {
+        return Err(format!("文件 {rel} 已存在"));
+    }
+    // 父目录可能还不存在（如 src/foo.js），先创建再校验越界
+    let parent = full.parent().ok_or("无效路径")?;
+    fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    let canon_tool = tool_dir
+        .canonicalize()
+        .map_err(|_| "工具目录不存在".to_string())?;
+    let canon_parent = parent
+        .canonicalize()
+        .map_err(|_| "无效路径".to_string())?;
+    if !canon_parent.starts_with(&canon_tool) {
+        return Err("路径越界".into());
+    }
+    Ok(full)
+}
+
+/// 在工具目录中新建文件：支持子目录路径（如 src/util.js，父目录自动创建）。
+/// 创建后由前端刷新文件树并打开。
+#[tauri::command]
+pub async fn create_tool_file(
+    app: AppHandle,
+    id: String,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let data_dir = Sidecar::data_dir(&app)?;
+    let full = validate_new_file_path(&data_dir, &id, &path)?;
+    fs::write(&full, content).map_err(|e| format!("写入 {path} 失败: {e}"))
+}
+
+/// 删除工具内的一个文件（仅文件；目录会被 remove_file 拒绝）。
+/// 复用 resolve_tool_path 的越界校验，删除后由前端刷新文件树。
+#[tauri::command]
+pub async fn delete_tool_file(
+    app: AppHandle,
+    id: String,
+    path: String,
+) -> Result<(), String> {
+    let data_dir = Sidecar::data_dir(&app)?;
+    let full = resolve_tool_path(&data_dir, &id, &path)?;
+    fs::remove_file(&full).map_err(|e| format!("删除 {path} 失败: {e}"))
+}
+
+/// 用系统文件管理器打开目录：id 为空时打开整个工具箱目录（toolbox/），
+/// 否则打开该工具的目录，方便用户查看/管理保存的文件。
+#[tauri::command]
+pub async fn open_tool_dir(app: AppHandle, id: String) -> Result<(), String> {
+    let data_dir = Sidecar::data_dir(&app)?;
+    let toolbox = data_dir.join("toolbox");
+    let dir = if id.trim().is_empty() {
+        toolbox
+    } else {
+        if !regex_id(&id) {
+            return Err("非法的工具 id".into());
+        }
+        toolbox.join(&id)
+    };
+    if !dir.exists() {
+        return Err(format!("目录不存在：{}", dir.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(&dir)
+        .spawn()
+        .map_err(|e| format!("无法打开目录: {e}"))?;
+    Ok(())
+}
+
 /// 删除工具：先停止进程，再删除工具目录，并从排序文件移除
 #[tauri::command]
 pub async fn delete_tool(app: AppHandle, id: String) -> Result<(), String> {

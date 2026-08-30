@@ -164,6 +164,15 @@ async function refresh() {
   }
 }
 
+/** 在文件管理器中打开工具箱保存目录（%APPDATA%\com.tools.platform\toolbox） */
+async function openToolbox() {
+  try {
+    await api.openToolDir();
+  } catch (e) {
+    error.value = "打开目录失败：" + ((e as Error)?.message ?? String(e));
+  }
+}
+
 onMounted(refresh);
 </script>
 
@@ -173,6 +182,13 @@ onMounted(refresh);
       <div class="brand">🧰 小工具平台</div>
       <input v-model="search" class="search" placeholder="搜索工具…" />
       <div class="actions">
+        <button
+          class="ghost"
+          title="打开工具箱保存目录（%APPDATA%\\com.tools.platform\\toolbox）"
+          @click="openToolbox"
+        >
+          打开目录
+        </button>
         <button class="ghost" @click="router.push({ name: 'tutorial' })">
           📖 教程
         </button>

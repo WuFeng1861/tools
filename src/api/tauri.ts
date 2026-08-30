@@ -19,6 +19,16 @@ export const api = {
     path: string,
     content: string,
   ): Promise<void> => invoke("write_tool_file", { id, path, content }),
+  createToolFile: (
+    id: string,
+    path: string,
+    content: string,
+  ): Promise<void> => invoke("create_tool_file", { id, path, content }),
+  deleteToolFile: (id: string, path: string): Promise<void> =>
+    invoke("delete_tool_file", { id, path }),
+  /** 打开目录：id 为空打开整个工具箱目录（toolbox/），否则打开该工具目录 */
+  openToolDir: (id?: string): Promise<void> =>
+    invoke("open_tool_dir", { id: id ?? "" }),
   startTool: (id: string): Promise<ToolInfo> => invoke("start_tool", { id }),
   stopTool: (id: string): Promise<void> => invoke("stop_tool", { id }),
   toolStatus: (id: string): Promise<ToolInfo> => invoke("tool_status", { id }),

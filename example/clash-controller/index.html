@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clash 远程控制器</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" fill="#60a5fa" />
+          </svg>
+        </div>
+        <div>
+          <h1>Clash 远程控制器</h1>
+          <p class="subtitle">连接 Clash 外部控制器，切换节点与运行模式，测速与管理配置</p>
+        </div>
+      </header>
+
+      <!-- ① 连接状态 + 运行模式 + 全局操作 -->
+      <section class="card status-card">
+        <div class="status-head">
+          <span id="conn-dot" class="dot dot-idle" title="连接状态"></span>
+          <div class="status-text">
+            <div id="conn-name" class="conn-name">未连接</div>
+            <div id="conn-detail" class="conn-detail">添加并启用一个控制器配置后自动连接</div>
+          </div>
+          <span id="conn-version" class="version-badge hidden"></span>
+        </div>
+
+        <!-- 连接错误横幅（网络异常 / 鉴权失败等） -->
+        <div id="conn-error" class="banner error hidden">
+          <span id="conn-error-text" class="banner-text"></span>
+          <button type="button" id="btn-retry" class="btn-mini">重试</button>
+        </div>
+
+        <div class="toolbar">
+          <div class="mode-switch" id="mode-switch" role="group" aria-label="运行模式">
+            <button type="button" data-mode="global" title="全局模式：所有流量走 GLOBAL 组">全局</button>
+            <button type="button" data-mode="rule" title="规则模式：按分流规则匹配">规则</button>
+            <button type="button" data-mode="direct" title="直连模式：所有流量直连">直连</button>
+          </div>
+          <div class="toolbar-btns">
+            <button type="button" id="btn-refresh" class="btn-ghost" title="重新拉取代理组与节点、运行模式">刷新</button>
+            <button type="button" id="btn-test-all" class="btn-ghost" title="对全部节点执行延迟测试">全部测速</button>
+            <button type="button" id="btn-reload" class="btn-ghost danger" title="重载 Clash 订阅配置文件">重载配置</button>
+          </div>
+        </div>
+
+        <!-- 全部测速进度（执行期间显示） -->
+        <div id="speed-progress" class="banner info hidden">
+          <span class="spinner" aria-hidden="true"></span>
+          <span id="speed-progress-text" class="banner-text">测速中…</span>
+          <button type="button" id="btn-cancel-test" class="btn-mini hidden">取消</button>
+        </div>
+
+        <details class="speed-settings">
+          <summary>测速设置</summary>
+          <div class="settings-grid">
+            <div class="field">
+              <label for="test-url">测速 URL</label>
+              <input type="text" id="test-url" spellcheck="false" autocomplete="off"
+                     placeholder="http://www.gstatic.com/generate_204" />
+            </div>
+            <div class="field">
+              <label for="test-timeout">超时 (ms)</label>
+              <input type="number" id="test-timeout" min="500" max="30000" step="100" value="5000" />
+            </div>
+          </div>
+          <button type="button" id="btn-save-settings" class="btn-ghost btn-sm">保存设置</button>
+        </details>
+      </section>
+
+      <!-- ② 控制器配置管理（多条配置：新增 / 编辑 / 删除 / 切换） -->
+      <section class="card">
+        <div class="card-head">
+          <h2>控制器配置</h2>
+          <button type="button" id="btn-add-profile" class="btn-primary btn-sm">＋ 新增</button>
+        </div>
+
+        <div id="profile-empty" class="empty">
+          还没有配置。点「新增」填写 Clash 外部控制器地址（IP/域名 + 端口）与鉴权 Secret。
+        </div>
+        <ul id="profile-list" class="profile-list"></ul>
+
+        <!-- 新增 / 编辑表单 -->
+        <form id="profile-form" class="profile-form hidden" novalidate>
+          <h3 id="form-title">新增配置</h3>
+
+          <div class="field">
+            <label for="f-name">配置名称 <span class="req">*</span></label>
+            <input type="text" id="f-name" maxlength="40" autocomplete="off"
+                   placeholder="例如：家里的软路由" />
+            <p class="field-error hidden" id="err-name"></p>
+          </div>
+
+          <div class="grid-host">
+            <div class="field field-proto">
+              <label for="f-proto">协议</label>
+              <select id="f-proto">
+                <option value="http" selected>HTTP</option>
+                <option value="https">HTTPS</option>
+              </select>
+            </div>
+            <div class="field field-host">
+              <label for="f-host">控制器地址 <span class="req">*</span></label>
+              <input type="text" id="f-host" autocomplete="off" spellcheck="false"
+                     placeholder="IP 或域名，如 192.168.1.1" />
+              <p class="field-error hidden" id="err-host"></p>
+            </div>
+            <div class="field field-port">
+              <label for="f-port">端口 <span class="req">*</span></label>
+              <input type="number" id="f-port" min="1" max="65535" placeholder="9090" />
+              <p class="field-error hidden" id="err-port"></p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="f-secret">鉴权 Secret（未设置可留空）</label>
+            <div class="input-with-toggle">
+              <input type="password" id="f-secret" autocomplete="off"
+                     placeholder="external-controller 的 secret" />
+              <button type="button" id="btn-toggle-secret" class="btn-toggle">显示</button>
+            </div>
+          </div>
+
+          <!-- 连接测试反馈（成功 / 失败） -->
+          <div id="form-feedback" class="banner hidden"></div>
+
+          <div class="form-actions">
+            <button type="button" id="btn-test-conn" class="btn-ghost">测试连接</button>
+            <span class="spacer"></span>
+            <button type="button" id="btn-cancel-form" class="btn-ghost">取消</button>
+            <button type="submit" id="btn-save-profile" class="btn-primary">保存</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ③ 代理组与节点 -->
+      <section class="card groups-card">
+        <div class="card-head">
+          <h2>代理组与节点</h2>
+          <span id="groups-meta" class="groups-meta"></span>
+        </div>
+        <!-- 连接中 / 未连接 / 无代理组 等状态提示 -->
+        <div id="groups-state" class="groups-state hidden"></div>
+        <div id="groups-list"></div>
+      </section>
+
+      <p class="footnote">Secret 明文保存在工具目录 profiles.json 中，请在本机可信环境使用。</p>
+    </main>
+
+    <div id="toast" class="toast hidden" aria-live="polite"></div>
+
+    <script src="/front.js"></script>
+  </body>
+</html>

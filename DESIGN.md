@@ -225,6 +225,9 @@ server.start();          // 自动监听 process.env.TOOL_PORT，也可自定义
 | `list_tools()` | 工具列表（从宿主读取，含状态/端口） |
 | `create_tool({ name, template })` | 从模板新建工具目录 |
 | `read_tool_file(id, path)` / `write_tool_file(id, path, content)` | 编辑器读写文件（做路径白名单校验） |
+| `create_tool_file(id, path, content)` | 编辑器新建文件（支持子目录，父目录自动创建，同样做白名单校验） |
+| `delete_tool_file(id, path)` | 编辑器删除文件（复用白名单校验，仅文件） |
+| `open_tool_dir(id?)` | 打开工具箱目录（id 为空）或指定工具目录（系统文件管理器） |
 | `start_tool(id)` / `stop_tool(id)` / `tool_status(id)` | 启动/停止/状态 |
 | `tool_logs(id, tail)` | 最近日志 |
 | `install_package(id, pkg, version?)` / `uninstall_package(id, pkg)` / `list_packages(id)` | 依赖管理 |

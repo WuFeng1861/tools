@@ -38,8 +38,119 @@ const saving = ref(false);
 const statusMsg = ref("");
 const showManifestHint = ref(false);
 
+// ---- 新增文件 ----
+const showNewFile = ref(false);
+const newFilePath = ref("");
+const newFileTemplate = ref("blank");
+const creatingFile = ref(false);
+const newFileError = ref("");
+
+/** 新增文件的模板内容（按所选类型给一段最小骨架） */
+const FILE_TEMPLATES: Record<string, string> = {
+  blank: "",
+  js: '// 在此编写 JavaScript 代码\n',
+  html: '<!doctype html>\n<html lang="zh-CN">\n<head>\n  <meta charset="UTF-8" />\n  <title>页面</title>\n</head>\n<body>\n</body>\n</html>\n',
+  css: '/* 在此编写样式 */\n',
+  json: '{\n  \n}\n',
+  md: '# 标题\n',
+};
+
+/** 与后端一致的新文件名校验：不支持 .. / 绝对路径 / 隐藏或保留名 */
+function validateNewFilePath(p: string): string | null {
+  const rel = p.trim();
+  if (!rel) return "请输入文件名";
+  if (rel.endsWith("/")) return "文件名不能以 / 结尾";
+  if (rel.includes("..") || rel.startsWith("/") || rel.includes("\\")) {
+    return "非法的相对路径";
+  }
+  if (/^[a-zA-Z]:/.test(rel)) return "请使用相对路径";
+  const last = rel.split("/").pop() || rel;
+  if (last.startsWith(".") || last.startsWith("_") || last === "node_modules") {
+    return "不允许创建该文件名";
+  }
+  if (/[:?*"<>|]/.test(rel)) return "文件名包含非法字符";
+  return null;
+}
+
+function toggleNewFile() {
+  if (showNewFile.value) {
+    showNewFile.value = false;
+    return;
+  }
+  newFilePath.value = "";
+  newFileError.value = "";
+  showNewFile.value = true;
+  nextTick(() => {
+    const input = document.querySelector<HTMLInputElement>(".new-file input");
+    input?.focus();
+  });
+}
+
+/** 创建新文件：校验 → 调用后端 → 刷新文件树并打开新文件 */
+async function createFile() {
+  if (creatingFile.value) return;
+  const rel = newFilePath.value.trim();
+  const err = validateNewFilePath(rel);
+  if (err) {
+    newFileError.value = err;
+    return;
+  }
+  if (files.value.includes(rel)) {
+    newFileError.value = "文件已存在";
+    return;
+  }
+  creatingFile.value = true;
+  newFileError.value = "";
+  try {
+    await api.createToolFile(
+      id.value,
+      rel,
+      FILE_TEMPLATES[newFileTemplate.value] ?? "",
+    );
+    showNewFile.value = false;
+    // 只刷新文件树，然后打开新文件
+    files.value = await api.listToolFiles(id.value);
+    await openFile(rel);
+    statusMsg.value = `已创建 ${rel}`;
+  } catch (e) {
+    newFileError.value = (e as Error)?.message ?? String(e);
+  } finally {
+    creatingFile.value = false;
+  }
+}
+
 const editorEl = ref<HTMLElement | null>(null);
 let editorView: EditorView | null = null;
+
+/** 删除文件：确认后调后端，刷新文件树；若删的是当前打开文件则关闭并打开第一个 */
+async function deleteFile(path: string) {
+  const ok = window.confirm(`确定删除文件「${path}」吗？此操作不可恢复。`);
+  if (!ok) return;
+  try {
+    await api.deleteToolFile(id.value, path);
+    statusMsg.value = `已删除 ${path}`;
+    files.value = await api.listToolFiles(id.value);
+    if (selectedFile.value === path) {
+      destroyEditor();
+      selectedFile.value = "";
+      content.value = "";
+      dirty.value = false;
+      showManifestHint.value = false;
+      if (files.value.length) await openFile(files.value[0]);
+    }
+  } catch (e) {
+    statusMsg.value = (e as Error)?.message ?? String(e);
+  }
+}
+
+/** 在文件管理器中打开当前工具的保存目录 */
+async function openDir() {
+  try {
+    await api.openToolDir(id.value);
+  } catch (e) {
+    statusMsg.value = (e as Error)?.message ?? String(e);
+  }
+}
 
 /** 按文件扩展名选择 CodeMirror 语言 */
 function langFor(path: string): Extension {
@@ -224,6 +335,13 @@ onUnmounted(() => {
         <div class="spacer" />
         <button
           class="ghost"
+          title="在文件管理器中打开该工具的保存目录"
+          @click="openDir"
+        >
+          打开目录
+        </button>
+        <button
+          class="ghost"
           :disabled="!dirty || saving"
           @click="save"
         >
@@ -236,7 +354,43 @@ onUnmounted(() => {
 
       <main class="split">
         <aside class="tree">
-          <div class="tree-head">文件</div>
+          <div class="tree-head">
+            <span>文件</span>
+            <button
+              class="tree-add"
+              :title="showNewFile ? '收起' : '新建文件（支持子目录，如 src/util.js）'"
+              @click="toggleNewFile"
+            >
+              {{ showNewFile ? "收起" : "＋ 新增" }}
+            </button>
+          </div>
+
+          <!-- 新增文件内联表单 -->
+          <div v-if="showNewFile" class="new-file">
+            <input
+              v-model="newFilePath"
+              placeholder="如 data.json 或 src/util.js"
+              spellcheck="false"
+              @keydown.enter.prevent="createFile"
+              @keydown.esc="showNewFile = false"
+            />
+            <select v-model="newFileTemplate" title="生成对应类型的最小骨架内容">
+              <option value="blank">空文件</option>
+              <option value="js">JavaScript</option>
+              <option value="html">HTML</option>
+              <option value="css">CSS</option>
+              <option value="json">JSON</option>
+              <option value="md">Markdown</option>
+            </select>
+            <div v-if="newFileError" class="new-file-error">{{ newFileError }}</div>
+            <div class="new-file-actions">
+              <button class="mini" :disabled="creatingFile" @click="createFile">
+                {{ creatingFile ? "创建中…" : "创建" }}
+              </button>
+              <button class="mini" @click="showNewFile = false">取消</button>
+            </div>
+          </div>
+
           <div
             v-for="f in files"
             :key="f"
@@ -247,6 +401,13 @@ onUnmounted(() => {
           >
             <span class="file-name">{{ f }}</span>
             <span v-if="dirty && f === selectedFile" class="dot">●</span>
+            <button
+              class="file-del"
+              title="删除文件"
+              @click.stop="deleteFile(f)"
+            >
+              🗑
+            </button>
           </div>
         </aside>
 
@@ -369,9 +530,77 @@ button:disabled {
   font-size: 12px;
   color: var(--text-dim);
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tree-add {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.tree-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.new-file {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.new-file input,
+.new-file select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+.new-file input:focus,
+.new-file select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.new-file-error {
+  font-size: 12px;
+  color: var(--danger);
+  word-break: break-all;
+}
+.new-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.new-file-actions .mini {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.new-file-actions .mini:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .file-row {
+  position: relative;
   padding: 7px 10px;
+  padding-right: 30px;
   cursor: pointer;
   font-size: 13px;
   white-space: nowrap;
@@ -392,6 +621,30 @@ button:disabled {
 .dot {
   color: var(--accent);
   margin-left: 4px;
+}
+.file-del {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.file-row:hover .file-del {
+  opacity: 1;
+}
+.file-del:hover {
+  background: rgba(229, 72, 77, 0.15);
+  color: var(--danger);
 }
 .edit-area {
   flex: 1;

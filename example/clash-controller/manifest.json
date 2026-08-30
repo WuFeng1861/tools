@@ -1,0 +1,9 @@
+{
+  "id": "clash-controller",
+  "name": "Clash 远程控制器",
+  "version": "0.1.0",
+  "description": "连接 Clash 外部控制器：多配置管理、切换代理组节点与运行模式、批量延迟测速、重载订阅配置",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

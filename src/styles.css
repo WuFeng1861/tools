@@ -83,8 +83,9 @@ button.ghost:hover {
   background: transparent;
 }
 
+/* 系统深色偏好：仅在未手动指定主题时生效（跟随系统） */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #1b1d22;
     --bg-panel: #23262d;
     --border: #33363f;
@@ -92,4 +93,19 @@ button.ghost:hover {
     --text-dim: #9aa0aa;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
   }
+}
+
+/* 手动夜间模式：html 上 data-theme="dark"，由 App.vue 的主题切换控制 */
+:root[data-theme="dark"] {
+  --bg: #1b1d22;
+  --bg-panel: #23262d;
+  --border: #33363f;
+  --text: #e6e8ec;
+  --text-dim: #9aa0aa;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* 夜间模式下滚动条改为浅色，避免在深色背景上不可见 */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
 }
