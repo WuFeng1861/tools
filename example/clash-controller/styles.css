@@ -208,6 +208,57 @@ h1 {
   color: #15803d;
 }
 
+/* ---------- 实际生效链路（自动检测） ---------- */
+.usage-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid #93c5fd;
+  background: #eff6ff;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.usage-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.usage-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.6;
+  word-break: break-all;
+}
+
+.usage-mode {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.usage-group {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.usage-leaf {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.usage-note {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
 /* ---------- 工具条：模式切换 + 操作按钮 ---------- */
 .toolbar {
   display: flex;

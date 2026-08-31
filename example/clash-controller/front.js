@@ -10,6 +10,7 @@
 //   · 全局状态（state）与渲染（renderStatus / renderProfiles / renderGroups）
 //   · 连接与数据刷新（connect / refreshData）
 //   · 运行模式切换（setMode）
+//   · 实际生效链路自动检测（updateUsage：全局→GLOBAL / 规则→规则主用组 / 直连）
 //   · 节点选择（selectNode）
 //   · 延迟测速（testNode / testGroup / testAll，均带加载状态与可取消）
 //   · 重载配置（reloadConfig）
@@ -41,6 +42,8 @@ const state = {
   expanded: new Set(),   // 已展开的组名
   speedTest: { running: false, done: 0, total: 0, cancel: false, ok: 0, fail: 0 },
   busy: { refresh: false, mode: false },
+  usage: null,           // 自动检测的实际生效链路 {mode, kind, root, chain, leaf}
+  rulePrimaryCache: null,// 规则模式主用组缓存 {t, root, count, total}
 };
 
 // =====================================================================
@@ -514,6 +517,7 @@ async function connect() {
     }
     state.conn.status = "ok";
     flashToast(`已连接 ${profile.name}（v${ver.version}${ver.meta ? " Meta" : ""}）`);
+    updateUsage(); // 自动检测实际生效链路
   } catch (err) {
     state.conn.status = "error";
     state.conn.error = err.message;
@@ -534,6 +538,7 @@ async function refreshData() {
     const px = await clashAction("proxies");
     state.proxies = px.proxies || {};
     buildGroups();
+    await updateUsage();
     flashToast("已刷新代理数据");
   } catch (err) {
     flashToast(`刷新失败：${err.message}`, true);
@@ -542,6 +547,125 @@ async function refreshData() {
     renderStatus();
     renderGroups();
   }
+}
+
+// =====================================================================
+// 实际生效链路（自动检测）：按模式解析「真正在用的组 → 节点」
+// =====================================================================
+
+/** 递归解析一个组的实际生效链路：Selector 组是手动选中的，URLTest/Fallback 是自动选的；
+ *  选中项可能是另一个组（如 一元机场.VIP 选了 自动选择），一直解析到叶子节点。带循环保护。 */
+function resolveChain(name, visited = new Set()) {
+  if (visited.has(name)) return { chain: [], leaf: name };
+  visited.add(name);
+  const g = state.proxies[name];
+  if (!g || !Array.isArray(g.all)) return { chain: [], leaf: name }; // 普通节点 / DIRECT / REJECT
+  const now = g.now;
+  const inner = now && state.proxies[now] && Array.isArray(state.proxies[now].all)
+    ? resolveChain(now, visited)
+    : null;
+  if (inner && inner.chain.length) {
+    return { chain: [name, ...inner.chain], leaf: inner.leaf };
+  }
+  return { chain: [name], leaf: now || name };
+}
+
+/** 计算「实际生效」：全局→GLOBAL；直连→不走代理；规则→规则主用组（规则统计缓存 60s） */
+async function computeUsage() {
+  const mode = state.conn.mode;
+  if (mode === "direct") {
+    state.usage = { mode, kind: "direct" };
+    return;
+  }
+  if (mode === "global") {
+    const r = resolveChain("GLOBAL");
+    state.usage = { mode, kind: "group", root: "GLOBAL", chain: r.chain, leaf: r.leaf };
+    return;
+  }
+  // 规则模式：统计规则指向的代理组，取引用最多的作为主用组（通用逻辑，不绑定具体订阅）
+  const t = Date.now();
+  if (!state.rulePrimaryCache || t - state.rulePrimaryCache.t > 60000) {
+    let root = null, count = 0, total = 0;
+    try {
+      const rules = await clashAction("rules");
+      total = (rules || []).length;
+      const counts = {};
+      for (const r of rules || []) {
+        const p = r && r.proxy;
+        if (!p || p === "DIRECT" || p === "REJECT") continue;
+        if (!state.proxies[p] || !Array.isArray(state.proxies[p].all)) continue; // 只要代理组
+        counts[p] = (counts[p] || 0) + 1;
+      }
+      const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      if (entries.length) { root = entries[0][0]; count = entries[0][1]; }
+    } catch { /* 读不到规则则按 none 处理 */ }
+    state.rulePrimaryCache = { t, root, count, total };
+  }
+  const cache = state.rulePrimaryCache;
+  if (!cache.root) {
+    state.usage = { mode, kind: "none" };
+    return;
+  }
+  const r = resolveChain(cache.root);
+  state.usage = {
+    mode,
+    kind: "group",
+    root: cache.root,
+    ruleCount: cache.count,
+    totalRules: cache.total,
+    chain: r.chain,
+    leaf: r.leaf,
+  };
+}
+
+/** 渲染「实际使用」横幅 */
+function renderUsage() {
+  const bar = $("usage-bar");
+  const u = state.usage;
+  if (!u || state.conn.status !== "ok") {
+    bar.classList.add("hidden");
+    return;
+  }
+  bar.classList.remove("hidden");
+  const text = $("usage-text");
+  text.textContent = "";
+  if (u.kind === "direct") {
+    text.appendChild(document.createTextNode("直连模式：所有流量直连，不经任何代理组"));
+    return;
+  }
+  if (u.kind === "group") {
+    const modeEl = document.createElement("b");
+    modeEl.className = "usage-mode";
+    modeEl.textContent = MODE_LABELS[u.mode] || u.mode;
+    text.appendChild(modeEl);
+    text.appendChild(document.createTextNode("模式 → "));
+    for (const g of u.chain) {
+      const s = document.createElement("span");
+      s.className = "usage-group";
+      s.textContent = g;
+      text.appendChild(s);
+      text.appendChild(document.createTextNode(" → "));
+    }
+    const leaf = document.createElement("span");
+    leaf.className = "usage-leaf";
+    leaf.textContent = u.leaf;
+    text.appendChild(leaf);
+    if (u.ruleCount) {
+      const note = document.createElement("span");
+      note.className = "usage-note";
+      note.textContent = `　规则主用「${u.root}」（${u.ruleCount}/${u.totalRules} 条）`;
+      text.appendChild(note);
+    }
+    return;
+  }
+  text.textContent = u.kind === "none"
+    ? "规则模式：没有规则指向任何代理组"
+    : "规则模式：无法读取规则，暂无法判断主用组";
+}
+
+async function updateUsage() {
+  await computeUsage();
+  renderUsage();
 }
 
 /** 静默同步：不弹提示、不打断当前操作地重新拉取模式与代理数据，
@@ -568,6 +692,7 @@ async function silentRefresh() {
     buildGroups();
     renderStatus();
     renderGroups();
+    await updateUsage();
   } catch {
     // 静默失败：可能是暂时抖动，等下一轮轮询再试
   }
@@ -606,6 +731,7 @@ async function setMode(mode) {
   try {
     await clashAction("setMode", { mode });
     flashToast(`已切换为${MODE_LABELS[mode]}模式`);
+    updateUsage(); // 模式变了，实际生效链路也要跟着变
   } catch (err) {
     state.conn.mode = prev;
     flashToast(`模式切换失败：${err.message}`, true);
@@ -626,6 +752,7 @@ async function selectNode(groupName, nodeName) {
     if (g) g.now = nodeName;
     flashToast(`已切换「${groupName}」→ ${nodeName}`);
     renderGroups();
+    updateUsage(); // 组内选中项变了，实际生效链路立即更新
     // 稍等内核应用后重新拉取，确认切换已生效（与 Clash 侧真实状态保持一致）
     setTimeout(silentRefresh, 500);
   } catch (err) {

@@ -31,6 +31,12 @@
           <span id="conn-version" class="version-badge hidden"></span>
         </div>
 
+        <!-- 自动检测的实际生效链路：全局→GLOBAL / 规则→规则主用组 / 直连 -->
+        <div id="usage-bar" class="usage-bar hidden">
+          <span class="usage-label">实际使用</span>
+          <span id="usage-text" class="usage-text"></span>
+        </div>
+
         <!-- 连接错误横幅（网络异常 / 鉴权失败等） -->
         <div id="conn-error" class="banner error hidden">
           <span id="conn-error-text" class="banner-text"></span>

@@ -22,6 +22,7 @@
 //   configs    GET   /configs                运行配置（含 mode）
 //   setMode    PATCH /configs                切换运行模式 rule/global/direct
 //   proxies    GET   /proxies                全部代理组与节点
+//   rules      GET   /rules                  全部规则（用于判断规则模式下的主用组）
 //   select     PUT   /proxies/:group         组内选择节点（body {name}）
 //   delay      GET   /proxies/:name/delay    单节点延迟测试
 //   groupDelay GET   /group/:name/delay      组测速（内核不支持时回退为逐节点测）
@@ -452,6 +453,13 @@ async function handleClashAction(payload) {
       const r = await clashRequest(conn, { apiPath: "/proxies", timeoutMs: 15000 });
       if (!r.data || !r.data.proxies) throw new Error("控制器未返回代理数据");
       return r.data;
+    }
+
+    // 全部规则：用于判断规则模式下「规则主要指向哪个代理组」
+    case "rules": {
+      const r = await clashRequest(conn, { apiPath: "/rules", timeoutMs: 8000 });
+      if (!r.data || !Array.isArray(r.data.rules)) throw new Error("控制器未返回规则数据");
+      return r.data.rules;
     }
 
     // 组内选择节点：PUT /proxies/:group  body {name}
