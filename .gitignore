@@ -29,3 +29,6 @@ toolbox/_logs/
 *.njsproj
 *.sln
 *.sw?
+
+# Agent 运行时数据（不进入版本控制）
+.workbuddy/

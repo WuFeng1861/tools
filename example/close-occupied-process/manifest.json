@@ -1,0 +1,9 @@
+{
+  "id": "close-occupied-process",
+  "name": "关闭占用端口/进程的应用",
+  "version": "0.1.0",
+  "description": "输入端口号或 PID，反查占用该端口/进程的应用并强制关闭（netstat + tasklist + taskkill）",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}
