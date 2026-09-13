@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ToolInfo, PackageInfo } from "../types";
+import type { ToolInfo, PackageInfo, ShortcutInfo } from "../types";
 
 /**
  * Tauri 命令的统一入口封装。
@@ -47,4 +47,43 @@ export const api = {
     invoke("uninstall_package", { id, pkg }),
   listPackages: (id: string): Promise<PackageInfo[]> =>
     invoke("list_packages", { id }),
+
+  // ---- 平台窗口 / 托盘 ----
+  /** 隐藏主窗口到托盘（后台继续运行） */
+  hideToTray: (): Promise<void> => invoke("hide_to_tray"),
+  /** 真正退出程序 */
+  quitApp: (): Promise<void> => invoke("quit_app"),
+  /** 把某工具的某个面板页显示为无边框置顶悬浮窗 */
+  openToolPanel: (toolId: string, panelId: string): Promise<void> =>
+    invoke("open_tool_panel", { toolId, panelId }),
+  /** 隐藏某工具的所有悬浮面板窗 */
+  hideToolPanel: (toolId: string): Promise<void> =>
+    invoke("hide_tool_panel", { toolId }),
+  /** 读取是否开机自启 */
+  getAutostart: (): Promise<boolean> => invoke("get_autostart"),
+  /** 设置开机自启 */
+  setAutostart: (enabled: boolean): Promise<boolean> =>
+    invoke("set_autostart", { enabled }),
+
+  // ---- 全局快捷键 ----
+  /** 列出所有工具声明的全局快捷键（含冲突 / 注册 / 运行状态） */
+  listShortcuts: (): Promise<ShortcutInfo[]> => invoke("list_shortcuts"),
+  /** 修改某动作的组合键，返回该条最新状态；冲突会抛错 */
+  setShortcutAccel: (
+    toolId: string,
+    shortcutId: string,
+    accel: string,
+  ): Promise<ShortcutInfo> =>
+    invoke("set_shortcut_accel", { toolId, shortcutId, accel }),
+  /** 恢复某动作为 manifest 默认组合键 */
+  resetShortcutAccel: (
+    toolId: string,
+    shortcutId: string,
+  ): Promise<ShortcutInfo> =>
+    invoke("reset_shortcut_accel", { toolId, shortcutId }),
+  /** 读取当前全局快捷键，如 "ctrl+shift+v"（兼容旧工具设置 UI） */
+  getClipboardHotkey: (): Promise<string> => invoke("get_clipboard_hotkey"),
+  /** 设置全局快捷键（兼容旧工具设置 UI） */
+  setClipboardHotkey: (accel: string): Promise<string> =>
+    invoke("set_clipboard_hotkey", { accel }),
 };

@@ -125,9 +125,14 @@ class PortPool {
 
 const pool = new PortPool(PORT_RANGE);
 
-/** 终止进程树（Windows 下用 taskkill 保证子进程一并结束） */
+/** 终止进程树（Windows 下用 taskkill 保证子进程一并结束；隐藏控制台避免弹黑框） */
 function killTree(pid, cb) {
-  execFile("taskkill", ["/pid", String(pid), "/T", "/F"], () => cb && cb());
+  execFile(
+    "taskkill",
+    ["/pid", String(pid), "/T", "/F"],
+    { windowsHide: true },
+    () => cb && cb(),
+  );
 }
 
 // ------------------------------------------------------------------ tools
@@ -241,6 +246,9 @@ async function loadManifest(id) {
       main: m.main,
       html: m.html,
       port: m.port || 0,
+      autoStart: m.autoStart === true,
+      shortcuts: Array.isArray(m.shortcuts) ? m.shortcuts : [],
+      panels: Array.isArray(m.panels) ? m.panels : [],
     },
   };
 }
@@ -506,6 +514,51 @@ async function handle(req, res) {
       return;
     }
 
+    // POST /tools/:id/shortcut —— 平台把全局快捷键事件转发给运行中的工具进程
+    if (
+      method === "POST" &&
+      seg[0] === "tools" &&
+      seg.length === 3 &&
+      seg[2] === "shortcut"
+    ) {
+      const r = runtimes.get(seg[1]);
+      if (!r) return send(res, { ok: false, error: "工具未运行" });
+      const bodyText = await new Promise((resolve) => {
+        let d = "";
+        req.on("data", (c) => (d += c));
+        req.on("end", () => resolve(d));
+      });
+      let body = {};
+      try {
+        body = JSON.parse(bodyText || "{}");
+      } catch {
+        /* 忽略 */
+      }
+      const forward = await new Promise((resolve) => {
+        const p = http.request(
+          {
+            host: "127.0.0.1",
+            port: r.port,
+            path: "/__platform/shortcut",
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          },
+          (resp) => {
+            let data = "";
+            resp.on("data", (c) => (data += c));
+            resp.on("end", () => resolve({ status: resp.statusCode, data }));
+          },
+        );
+        p.on("error", () => resolve({ status: 0, data: "forward-failed" }));
+        p.write(JSON.stringify(body));
+        p.end();
+      });
+      return send(res, {
+        ok: forward.status >= 200 && forward.status < 300,
+        data: { forwarded: forward },
+      });
+    }
+
     // POST /tools/:id/start | /tools/:id/stop
     if (method === "POST" && seg[0] === "tools" && seg.length === 3) {
       const id = seg[1];
@@ -559,6 +612,18 @@ async function main() {
   await ensureDirs();
   await seedExampleTools();
 
+  // 自拉起 autoStart 标记的后台常驻工具（best-effort，失败仅记录日志）
+  const all = await scanTools();
+  for (const m of all) {
+    if (m.autoStart) {
+      try {
+        await startTool(m.id);
+      } catch (e) {
+        log(`自启动工具 ${m.id} 失败: ${e.message}`);
+      }
+    }
+  }
+
   const server = http.createServer(handle);
   await new Promise((r) => server.listen(ARGS.port || 0, "127.0.0.1", r));
   const hostPort = server.address().port;
@@ -583,6 +648,7 @@ async function main() {
       try {
         execFileSync("taskkill", ["/pid", String(state.proc.pid), "/T", "/F"], {
           stdio: "ignore",
+          windowsHide: true,
         });
       } catch {
         /* 进程已不存在 */

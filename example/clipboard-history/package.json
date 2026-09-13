@@ -1,0 +1,8 @@
+{
+  "name": "clipboard-history",
+  "version": "0.1.0",
+  "private": true,
+  "main": "app.js",
+  "description": "后台记录剪贴板历史（文字/图片/文件）",
+  "dependencies": {}
+}

@@ -192,6 +192,12 @@ onMounted(refresh);
         <button class="ghost" @click="router.push({ name: 'tutorial' })">
           📖 教程
         </button>
+        <button class="ghost" @click="router.push({ name: 'settings' })">
+          ⚙️ 设置
+        </button>
+        <button class="ghost" @click="router.push({ name: 'shortcuts' })">
+          ⌨️ 快捷键
+        </button>
         <button class="ghost" @click="router.push({ name: 'dependencies' })">
           依赖管理
         </button>

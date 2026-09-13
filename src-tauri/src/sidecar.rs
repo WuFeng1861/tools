@@ -146,9 +146,11 @@ async fn host_alive(port: u16) -> bool {
 fn kill_pid(pid: u32) {
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/pid", &pid.to_string(), "/T", "/F"])
-            .output();
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW，避免弹黑框
+        let _ = cmd.output();
     }
     let _ = pid;
 }

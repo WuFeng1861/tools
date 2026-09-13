@@ -1,9 +1,10 @@
 :root {
-  --bg: #f5f6f8;
-  --bg-panel: #ffffff;
-  --border: #e3e5ea;
-  --text: #1f2329;
-  --text-dim: #6b7280;
+  /* 白天模式：偏暖米色系，降低冷白刺眼度 */
+  --bg: #faf3ea;
+  --bg-panel: #fffbf4;
+  --border: #ece1d2;
+  --text: #2a251d;
+  --text-dim: #8a7a67;
   --accent: #4f6ef7;
   --accent-hover: #3d5ce5;
   --danger: #e5484d;
@@ -11,6 +12,11 @@
   --radius: 10px;
   --radius-sm: 7px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  /* 显示效果（由设置中的滑块控制），1/0=原样 */
+  --brightness: 1;
+  --saturate: 1;
+  --contrast: 1;
+  --warmth: 0;
   font-family: "Segoe UI", "Microsoft YaHei", system-ui, -apple-system,
     sans-serif;
 }
@@ -25,6 +31,15 @@ html,
 body,
 #app {
   height: 100%;
+}
+
+/* background 放在 #app 上，使其被 filter 覆盖，视觉滑块才能作用于整体背景 */
+#app {
+  background: var(--bg);
+  filter: brightness(var(--brightness, 1))
+    saturate(var(--saturate, 1))
+    contrast(var(--contrast, 1))
+    sepia(var(--warmth, 0));
 }
 
 body {
@@ -76,7 +91,7 @@ button.ghost:hover {
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(165, 125, 70, 0.28);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-track {

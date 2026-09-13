@@ -35,10 +35,13 @@ async function openTool() {
 }
 
 async function stopAndBack() {
-  try {
-    await api.stopTool(currentId);
-  } catch {
-    /* 忽略停止错误 */
+  // 后台常驻工具不随界面关闭而停止
+  if (tool.value?.autoStart !== true) {
+    try {
+      await api.stopTool(currentId);
+    } catch {
+      /* 忽略停止错误 */
+    }
   }
   router.push("/");
 }
@@ -82,10 +85,13 @@ watch(
   async (newId) => {
     if (pollTimer) clearInterval(pollTimer);
     if (currentId && currentId !== newId) {
-      try {
-        await api.stopTool(currentId);
-      } catch {
-        /* 忽略 */
+      // 后台常驻工具不随界面关闭而停止
+      if (tool.value?.autoStart !== true) {
+        try {
+          await api.stopTool(currentId);
+        } catch {
+          /* 忽略 */
+        }
       }
     }
     currentId = newId;
@@ -102,10 +108,13 @@ watch(
 onUnmounted(async () => {
   if (pollTimer) clearInterval(pollTimer);
   if (currentId) {
-    try {
-      await api.stopTool(currentId);
-    } catch {
-      /* 忽略 */
+    // 后台常驻工具不随界面关闭而停止
+    if (tool.value?.autoStart !== true) {
+      try {
+        await api.stopTool(currentId);
+      } catch {
+        /* 忽略 */
+      }
     }
   }
 });

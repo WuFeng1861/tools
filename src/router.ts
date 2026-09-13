@@ -31,6 +31,16 @@ const router = createRouter({
       name: "tutorial",
       component: () => import("./views/TutorialView.vue"),
     },
+    {
+      path: "/settings",
+      name: "settings",
+      component: () => import("./views/SettingsView.vue"),
+    },
+    {
+      path: "/shortcuts",
+      name: "shortcuts",
+      component: () => import("./views/ShortcutsView.vue"),
+    },
   ],
 });
 

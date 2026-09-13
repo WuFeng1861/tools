@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "build:release": "tauri build --bundles nsis",
+    "build:nsis": "tauri build --bundles nsis",
+    "clean:host": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-CimInstance Win32_Process | Where-Object { ($_.Name -eq 'node.exe' -and $_.CommandLine -like '*ccp\\tools*') -or $_.Name -eq 'tools.exe' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }\""
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

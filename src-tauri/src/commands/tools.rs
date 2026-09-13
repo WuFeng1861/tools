@@ -81,13 +81,23 @@ pub async fn tool_status(app: AppHandle, id: String) -> Result<ToolInfo, String>
 #[tauri::command]
 pub async fn start_tool(app: AppHandle, id: String) -> Result<ToolInfo, String> {
     let v = call(&app, "POST", &format!("/tools/{id}/start"), None).await?;
+    refresh_tray(&app);
     parse_tool(v)
 }
 
 #[tauri::command]
 pub async fn stop_tool(app: AppHandle, id: String) -> Result<(), String> {
     call(&app, "POST", &format!("/tools/{id}/stop"), None).await?;
+    refresh_tray(&app);
     Ok(())
+}
+
+/// 启动/停止工具后刷新托盘“后台工具”子菜单（fire-and-forget）
+fn refresh_tray(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        crate::refresh_tray_menu(&app).await;
+    });
 }
 
 #[tauri::command]

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>剪贴板历史</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <div class="topbar">
+      <span class="brand">📋 剪贴板历史</span>
+      <span class="spacer"></span>
+      <input id="search" class="search" placeholder="搜索内容 / 文件名…" />
+      <div class="seg" id="typeSeg">
+        <button data-type="" class="on">全部</button>
+        <button data-type="text">文字</button>
+        <button data-type="image">图片</button>
+        <button data-type="files">文件</button>
+      </div>
+      <button id="btnSettings" class="btn">设置</button>
+      <button id="btnClear" class="btn danger">清空</button>
+    </div>
+
+    <div id="notice" class="notice warn" style="display:none"></div>
+
+    <!-- 设置面板 -->
+    <div id="settings" class="settings" style="display:none">
+      <h3>设置</h3>
+      <div class="row">
+        <div>
+          <div class="label">监控剪贴板</div>
+          <div class="hint">关闭后停止记录新复制内容</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="sMonitor" /><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label">保存条数上限</div>
+        <input type="number" id="sMaxEntries" min="10" max="2000" step="10" />
+      </div>
+      <div class="row">
+        <div class="label">图片保存张数上限</div>
+        <input type="number" id="sMaxImages" min="5" max="500" step="5" />
+      </div>
+      <div class="row">
+        <div class="label">轮询间隔（毫秒）</div>
+        <input type="number" id="sPoll" min="100" max="2000" step="50" />
+      </div>
+      <div class="row">
+        <div class="label">同一内容去重</div>
+        <label class="switch"><input type="checkbox" id="sDedupe" /><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label">显示来源应用</div>
+        <label class="switch"><input type="checkbox" id="sSource" /><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label">清空时保留置顶项</div>
+        <label class="switch"><input type="checkbox" id="sKeepPin" /><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label">
+          全局快捷键（悬浮面板）
+          <div class="hint">点击输入框后按下组合键，再点「应用」</div>
+        </div>
+        <div class="hotkey-capture">
+          <input id="hotkey" type="text" spellcheck="false" readonly="true" placeholder="点击后按下组合键" />
+          <button id="btnHotkeyApply" class="btn primary" style="display:none">应用</button>
+          <span id="hotkeyStatus" class="hint"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 空状态 -->
+    <div id="empty" class="empty" style="display:none">
+      <div class="big">还没有剪贴板记录</div>
+      <div>复制点文字、图片或文件试试，这里会自动收录</div>
+    </div>
+
+    <!-- 历史列表 -->
+    <div id="list" class="list"></div>
+  </div>
+
+  <script src="/front.js"></script>
+</body>
+</html>

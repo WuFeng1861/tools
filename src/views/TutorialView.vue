@@ -8,7 +8,7 @@ const router = useRouter();
   <div class="tutorial">
     <header class="topbar">
       <button class="ghost" @click="router.push('/')">← 返回</button>
-      <span class="title">📖 新建工具教程</span>
+      <span class="title">📖 使用教程</span>
       <div class="spacer" />
       <button class="ghost" @click="router.push({ name: 'tool-editor-new' })">
         ➕ 去新建一个
@@ -116,6 +116,100 @@ http.createServer((req, res) => {
       </section>
 
       <section class="block">
+        <h2>后台挂起 &amp; 系统托盘</h2>
+        <p>点右上角「关闭 (×)」时，会弹出「转入后台 / 退出程序」选择，并可用「记住我的选择，不再询问」。</p>
+        <ul>
+          <li><strong>转入后台</strong>：窗口隐藏、继续在托盘运行，宿主与后台工具不中断；托盘<strong>左键单击/双击</strong>可重新打开主界面。</li>
+          <li><strong>退出程序</strong>：真正结束，会停止宿主与所有工具进程。</li>
+          <li>托盘<strong>右键</strong>菜单：显示主界面 / <strong>后台工具 ▸</strong>（点击直达某工具）/ 退出程序。</li>
+          <li>这个记忆选择可在 <strong>主界面 → ⚙️ 设置</strong> 里随时修改。</li>
+        </ul>
+      </section>
+
+      <section class="block">
+        <h2>后台常驻工具（autoStart）</h2>
+        <p>在工具的 <code>manifest.json</code> 里加 <code>"autoStart": true</code>，平台启动时就会自动拉起它，且<strong>关闭它的界面不会停止它</strong>（例如剪贴板历史这样需要一直后台运行的）。</p>
+        <ul>
+          <li>后台工具会出现在<b>托盘右键 → 后台工具 ▸</b>，点击直达。</li>
+          <li>普通工具（无 autoStart）仍按老逻辑：离开界面即停止。</li>
+        </ul>
+      </section>
+
+      <section class="block">
+        <h2>全局快捷键（manifest 声明 + 统一管理）</h2>
+        <p><strong>任意工具</strong>都可以在 <code>manifest.json</code> 里用 <code>shortcuts</code> 数组声明<strong>多个</strong>全局快捷键，每个对应一个不同动作。平台启动时读取并按你声明的组合键注册为<strong>系统级全局快捷键</strong>。</p>
+        <pre><code>// manifest.json —— 声明一把快捷键
+"shortcuts": [
+  { "id": "toggle-quick", "name": "唤起 / 收起快速面板",
+    "accel": "ctrl+shift+v", "action": "toggle-quick" }
+]</code></pre>
+        <ul>
+          <li>所有工具的快捷键集中在 <strong>主界面 → ⌨️ 快捷键</strong> 统一查看、修改、恢复默认，改动即时生效。</li>
+          <li>若同一组合键被<strong>多个动作</strong>占用，这两项都会标红「冲突」且不注册；改成冲突键时页面会拦截并提示（系统自身已占用也会有提示）。</li>
+          <li>剪贴板历史示例默认声明了 <code>ctrl+shift+v</code>（唤起/收起快速面板）。</li>
+        </ul>
+      </section>
+
+      <section class="block">
+        <h2>按下快捷键后发生了什么（纯事件转发）</h2>
+        <p>平台对组合键按下只做一件事：把 <code>{ shortcutId, action }</code> 通过宿主 <code>POST</code> 转发给<strong>该工具的 <code>/__platform/shortcut</code></strong>，由你的工具代码决定做什么。平台不做任何"预设行为"。</p>
+        <pre><code>// 工具后端 app.js —— 处理快捷键事件
+server.route("/__platform/shortcut", (req, res, body) => {
+  const j = JSON.parse(body || "{}");
+  console.log("快捷键", j.shortcutId, "→", j.action);
+  res.json({ ok: true });
+});</code></pre>
+        <p>工具未运行时事件会被丢弃（可在该路由打日志排查）。一个工具可以声明多把快捷键，<code>action</code> 互不干扰。</p>
+      </section>
+
+      <section class="block">
+        <h2>悬浮面板：交给你的用户代码</h2>
+        <p>窗口（webview）只有平台能创建，但<strong>要不要弹、弹哪个页面、何时收起</strong>完全由工具的用户代码决定，平台不把面板绑定到任何快捷键上。先声明面板元数据：</p>
+        <pre><code>// manifest.json —— 声明悬浮面板（纯窗口描述，与快捷键无关）
+"panels": [
+  { "id": "quick", "page": "quick.html", "title": "剪贴板历史",
+    "width": 380, "height": 560 }
+]</code></pre>
+        <p>工具进程没有 Tauri API，通过<strong>标记文件</strong>请求平台建/收窗：</p>
+        <ul>
+          <li>写 <code>.quick-toggle</code>（内容 <code>{"panelId":"quick"}</code>）→ 平台按面板<strong>当前可见性开/关</strong>（按一次开、再按一次必关，最可靠）。</li>
+          <li>写 <code>.quick-open</code> / <code>.quick-close</code> → 显式请求弹出 / 收起。</li>
+          <li>平台每 400ms 扫描各工具目录的这些标记执行。</li>
+          <li>面板页自身想关闭：面板页脚本 <code>fetch("/api/panel-close")</code>（面板页与你的后端同源）即可。</li>
+        </ul>
+        <pre><code>// 剪贴板示例 app.js：收到 toggle-quick 时请求平台“开/关”面板
+server.route("/__platform/shortcut", (req, res, body) => {
+  const j = JSON.parse(body || "{}");
+  if (j.action === "toggle-quick") {
+    fs.writeFileSync(path.join(__dirname, ".quick-toggle"),
+      JSON.stringify({ panelId: "quick" }));
+  }
+  res.json({ ok: true });
+});</code></pre>
+      </section>
+
+      <section class="block">
+        <h2>给自己的工具加「全局快捷键 / 悬浮面板」</h2>
+        <ol>
+          <li>在 <code>manifest.json</code> 加 <code>shortcuts</code>（声明快捷键）和可选 <code>panels</code>（声明悬浮面板）。</li>
+          <li>重启平台，或到 <strong>⌨️ 快捷键</strong> 页点「刷新」，快捷键即完成注册（冲突项会标红）。</li>
+          <li>把面板页（如 <code>quick.html</code>）放进工具目录 —— 它与 <code>index.html</code> 共用同一个后端端口，能直接 <code>fetch</code> 自己的 <code>/api/*</code>。</li>
+          <li>在 <code>app.js</code> 加 <code>/__platform/shortcut</code> 路由处理你的动作；需要弹/收面板时就写 <code>.quick-open</code> / <code>.quick-close</code> 标记。</li>
+        </ol>
+        <p class="note">这是纯工具层配置，不需要改平台源码；剪贴板历史就是这套机制的完整示例。</p>
+      </section>
+
+      <section class="block">
+        <h2>剪贴板历史工具（示例）</h2>
+        <p>这是平台内置的一个实用示例工具，展示“后台常驻 + 全局快捷键 + 持久化”的完整用法：</p>
+        <ul>
+          <li>后台记录复制的<strong>文字 / 图片 / 文件</strong>；全局去重只留最新。</li>
+          <li>支持搜索、类型筛选、置顶、单条删除、清空、来源显示。</li>
+          <li>保存条数 / 图片张数可调（默认 200 / 50），重启保留。</li>
+        </ul>
+      </section>
+
+      <section class="block">
         <h2>常见问题</h2>
         <ul>
           <li><strong>id 不能改吗？</strong> 可以，但只能用小写字母/数字/<code>-</code>/<code>_</code>，且 id 就是目录名。</li>
@@ -167,6 +261,12 @@ http.createServer((req, res) => {
 .block h2 {
   font-size: 16px;
   margin-bottom: 10px;
+}
+.block .sub {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+  color: var(--text);
 }
 .block p,
 .block li {

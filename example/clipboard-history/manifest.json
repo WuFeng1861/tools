@@ -1,0 +1,27 @@
+{
+  "id": "clipboard-history",
+  "name": "剪贴板历史",
+  "version": "0.1.0",
+  "description": "后台记录复制历史（文字/图片/文件），支持搜索、置顶、再复制与全局快捷键快速面板",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0,
+  "autoStart": true,
+  "shortcuts": [
+    {
+      "id": "toggle-quick",
+      "name": "唤起 / 收起快速面板",
+      "accel": "ctrl+shift+v",
+      "action": "toggle-quick"
+    }
+  ],
+  "panels": [
+    {
+      "id": "quick",
+      "page": "quick.html",
+      "title": "剪贴板历史",
+      "width": 380,
+      "height": 560
+    }
+  ]
+}

@@ -11,6 +11,9 @@ pub struct ToolInfo {
     pub icon: Option<String>,
     pub main: String,
     pub html: String,
+    /// 后台常驻：宿主启动时自动拉起，界面关闭不停止
+    #[serde(default)]
+    pub auto_start: bool,
     /// running | stopped | error
     pub status: String,
     /// 运行中的实际端口
