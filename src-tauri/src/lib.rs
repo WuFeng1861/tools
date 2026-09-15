@@ -65,8 +65,31 @@ struct SettingsState {
     registered: Mutex<HashSet<String>>,
 }
 
+/// 屏蔽 Windows 因进程创建失败而弹出的错误框（如关机时 taskkill 失败）
+#[cfg(windows)]
+mod errguard {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetErrorMode(uMode: u32) -> u32;
+    }
+    const SEM_FAILCRITICALERRORS: u32 = 0x0001;
+    const SEM_NOGPFAULTERRORBOX: u32 = 0x0002;
+    const SEM_NOOPENFILEERRORBOX: u32 = 0x8000;
+    pub fn suppress() {
+        unsafe {
+            SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+mod errguard {
+    pub fn suppress() {}
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    errguard::suppress(); // 屏蔽进程创建失败时的错误弹框（关机/退出时 taskkill 等）
     tauri::Builder::default()
         .manage(sidecar::Sidecar::default())
         .manage(SettingsState::default())
@@ -108,10 +131,10 @@ pub fn run() {
             set_autostart,
         ])
         .setup(|app| {
-            // 开机自启时不弹出主界面，直接进托盘后台（托盘左键/右键可重新打开）
-            if std::env::args().any(|a| a == "--autostart") {
+            // 手动启动才显示主界面；开机自启（带 --autostart）保持隐藏、默认进托盘后台
+            if !std::env::args().any(|a| a == "--autostart") {
                 if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+                    let _ = w.show();
                 }
             }
             setup_tray(app.handle())?;

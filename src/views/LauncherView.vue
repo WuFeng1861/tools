@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { useRouter } from "vue-router";
 import draggable from "vuedraggable";
 import { api } from "../api/tauri";
@@ -153,16 +153,34 @@ async function onDragEnd() {
 }
 
 async function refresh() {
-  loading.value = true;
+  // 已有数据时后台静默刷新，避免重复闪烁
+  if (!tools.value.length) loading.value = true;
   error.value = "";
   try {
     tools.value = await api.listTools();
   } catch (e) {
     error.value = "运行时未就绪：" + ((e as Error)?.message ?? String(e));
+    // 宿主可能还在启动，稍后自动重试（后台隐藏时也会发，等就绪后自动清错）
+    scheduleRetry();
   } finally {
     loading.value = false;
   }
 }
+
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleRetry() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    refresh();
+  }, 1500);
+}
+
+onMounted(refresh);
+
+onUnmounted(() => {
+  if (retryTimer) clearTimeout(retryTimer);
+});
 
 /** 在文件管理器中打开工具箱保存目录（%APPDATA%\com.tools.platform\toolbox） */
 async function openToolbox() {
@@ -172,8 +190,6 @@ async function openToolbox() {
     error.value = "打开目录失败：" + ((e as Error)?.message ?? String(e));
   }
 }
-
-onMounted(refresh);
 </script>
 
 <template>
