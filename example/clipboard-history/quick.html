@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/styles.css" />
   <style>
     html, body { overflow: hidden; background: transparent; }
-    .quick { display: flex; flex-direction: column; height: 100vh; background: var(--bg); }
+    .quick { display: flex; flex-direction: column; height: 100vh; background: var(--bg); position: relative; }
     .qbar {
       display: flex; align-items: center; gap: 8px; padding: 8px;
       background: var(--panel); border-bottom: 1px solid var(--border);
@@ -48,6 +48,24 @@
     }
     .qfoot .cnt { font-size: 11px; color: var(--text-dim); }
     .qclear { border: none; background: transparent; cursor: pointer; font-size: 12px; color: var(--danger); padding: 4px 6px; }
+    .qconfirm {
+      position: absolute; inset: 0; display: none; z-index: 10;
+      align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.35);
+    }
+    .qc-body {
+      width: 240px; padding: 16px; border-radius: 10px;
+      background: var(--panel); border: 1px solid var(--border);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    }
+    .qc-title { font-size: 14px; margin-bottom: 14px; text-align: center; }
+    .qc-actions { display: flex; gap: 10px; }
+    .qc-actions button {
+      flex: 1; padding: 8px 0; border-radius: 7px; cursor: pointer;
+      font-size: 13px; border: 1px solid var(--border); background: var(--panel); color: var(--text);
+    }
+    .qc-cancel:hover { border-color: var(--text-dim); }
+    .qc-ok { color: var(--danger) !important; border-color: var(--danger) !important; }
   </style>
 </head>
 <body>
@@ -61,6 +79,17 @@
     <div class="qfoot">
       <span class="cnt" id="qcnt"></span>
       <button class="qclear" id="qClear">清空</button>
+    </div>
+
+    <!-- 面板内确认框（不依赖原生 confirm，避免被挡住） -->
+    <div class="qconfirm" id="qconfirm">
+      <div class="qc-body">
+        <div class="qc-title">确定清空全部历史？</div>
+        <div class="qc-actions">
+          <button class="qc-cancel" id="qcCancel">取消</button>
+          <button class="qc-ok" id="qcOk">确定</button>
+        </div>
+      </div>
     </div>
   </div>
   <script src="/quick.js"></script>

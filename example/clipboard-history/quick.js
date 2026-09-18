@@ -108,9 +108,16 @@
     searchEl.focus();
   });
 
-  // 清空
+  // 清空（用面板内自绘确认框，避免原生 confirm 在无边框小窗里被挡住）
+  var qc = document.getElementById("qconfirm");
   document.getElementById("qClear").addEventListener("click", function () {
-    if (!confirm("确定清空全部历史？")) return;
+    qc.style.display = "flex";
+  });
+  document.getElementById("qcCancel").addEventListener("click", function () {
+    qc.style.display = "none";
+  });
+  document.getElementById("qcOk").addEventListener("click", function () {
+    qc.style.display = "none";
     fetch("/api/clear", { method: "POST" }).catch(function () {});
   });
 
