@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>多号签到</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app-header">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+            <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" fill="#34d399" />
+          </svg>
+        </div>
+        <div>
+          <h1>多号签到</h1>
+          <p class="subtitle">WorkBuddy / Trae 多账户自动签到：查状态、幂等签到、token 刷新</p>
+        </div>
+      </header>
+
+      <!-- ① 账户列表 -->
+      <section class="card">
+        <div class="card-head">
+          <h2>账户池</h2>
+          <div class="btn-group">
+            <button type="button" id="btn-check-all" class="btn-ghost btn-sm">全部检查</button>
+            <button type="button" id="btn-claim-all" class="btn-ghost btn-sm">全部签到</button>
+            <button type="button" id="btn-add" class="btn-primary btn-sm">＋ 加入账户</button>
+          </div>
+        </div>
+        <div id="acct-empty" class="empty">还没有账户。点「加入账户」，按第 ② 步指引粘贴 token 即可。建议先加 1 个跑通，再加第 2 个。</div>
+        <div class="table-wrap"><table id="acct-table" class="acct-table hidden">
+          <thead><tr>
+            <th>备注</th><th>类型</th><th>状态</th><th>额度/签到</th><th>上次检查</th><th>操作</th>
+          </tr></thead>
+          <tbody id="acct-body"></tbody>
+        </table></div>
+        <div id="acct-feedback" class="banner hidden"></div>
+
+        <!-- 新增/编辑表单 -->
+        <form id="acct-form" class="acct-form hidden" novalidate>
+          <h3 id="form-title">加入账户</h3>
+          <div class="field">
+            <label>账户类型</label>
+            <div class="seg" id="f-type-seg" role="group" aria-label="账户类型">
+              <button type="button" data-type="workbuddy" class="active">WorkBuddy</button>
+              <button type="button" data-type="trae">Trae</button>
+            </div>
+            <p class="hint" id="type-hint"></p>
+          </div>
+          <div class="field">
+            <label for="f-remark">备注名 *</label>
+            <input type="text" id="f-remark" maxlength="60" placeholder="例如：主力号 / 小号1 / 朋友的号" autocomplete="off" />
+          </div>
+          <div class="field" data-for="workbuddy">
+            <label for="f-access">accessToken *</label>
+            <textarea id="f-access" rows="3" spellcheck="false" placeholder="从 workbuddy-desktop.info 里复制的 auth.accessToken"></textarea>
+          </div>
+          <div class="field" data-for="workbuddy">
+            <label for="f-refresh">refreshToken（用于60天后自动续，强烈建议填）</label>
+            <textarea id="f-refresh" rows="2" spellcheck="false" placeholder="同文件里的 auth.refreshToken"></textarea>
+          </div>
+          <div class="grid-2">
+            <div class="field" data-for="workbuddy">
+              <label for="f-uid">uid（可选，不填自动从 token 解析）</label>
+              <input type="text" id="f-uid" spellcheck="false" placeholder="account.uid / uin" />
+            </div>
+            <div class="field" data-for="workbuddy">
+              <label for="f-endpoint">endpoint（可选）</label>
+              <input type="text" id="f-endpoint" spellcheck="false" placeholder="默认 https://copilot.tencent.com" />
+            </div>
+          </div>
+          <div class="field" data-for="trae">
+            <label for="f-jwt">token（JWT，以 eyJ 开头） *</label>
+            <textarea id="f-jwt" rows="3" spellcheck="false" placeholder="Trae 登录态 JWT"></textarea>
+          </div>
+          <div class="field" data-for="trae">
+            <label for="f-device">deviceId *（该账号绑定过的设备，错了会 9074）</label>
+            <input type="text" id="f-device" spellcheck="false" placeholder="local_env.json 里的 device_id" />
+          </div>
+          <div id="form-feedback" class="banner hidden"></div>
+          <div class="form-actions">
+            <span class="spacer"></span>
+            <button type="button" id="btn-cancel-form" class="btn-ghost">取消</button>
+            <button type="submit" id="btn-save" class="btn-primary">保存</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- ② 如何加入账户 -->
+      <section class="card">
+        <div class="card-head"><h2>如何加入账户（按类型看）</h2></div>
+        <details open>
+          <summary><b>WorkBuddy 号：从本机登录态复制（推荐本机号这么加）</b></summary>
+          <ol class="steps">
+            <li>在本机装好 WorkBuddy 客户端并登录一次（微信/手机号均可）。</li>
+            <li>用 PowerShell 取 token（明文 JSON，只读你自己的会话）：<br />
+              <code class="cmd">Get-Content "$env:LOCALAPPDATA\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info" -Raw</code><br />
+              只需要其中 <code>auth.accessToken</code> 和 <code>auth.refreshToken</code>。取单个字段：<br />
+              <code class="cmd">((Get-Content "$env:LOCALAPPDATA\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info" -Raw | ConvertFrom-Json).auth.accessToken)</code>
+            </li>
+            <li>找不到文件？旧版本在 <code class="cmd">%APPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop.info</code>，或确认客户端确实登录过。</li>
+            <li>把两个 token 分别贴到上面表单。accessToken 约 60 天过期，refreshToken 约 90 天；填了 refresh 的话 60 天内点“刷新”自动续，不用重登。</li>
+            <li>别人的号：让对方在他自己电脑同样取一次发你（token 等同密码，传完让对方注意保管，泄露去客户端重登即失效）。</li>
+          </ol>
+        </details>
+        <details>
+          <summary><b>Trae 号：token + 已绑定的 deviceId 缺一不可</b></summary>
+          <ol class="steps">
+            <li>该账号先在<b>它自己的 Windows 电脑</b>装 TraeWork 桌面端并登录一次（完成设备绑定，这是官方要求）。</li>
+            <li>在那台电脑打开 <code class="cmd">%APPDATA%\TRAE SOLO CN\ModularData\ckg_server\local_env.json</code>，记下 <code>device_id</code>。</li>
+            <li>token 获取（二选一）：跑 <code>trae-signin / traework2api</code> 的 <code>login.ps1</code> 按提示登录换 token；或用内存扫描脚本从已登录的 <code>TRAE SOLO CN.exe</code> 提取 JWT（以 eyJ 开头）。</li>
+            <li>把 <code>token + deviceId</code> 一起贴到表单。<b>deviceId 错了会 9074（看着像成功其实没到账）</b>，且一台设备一天只能签一个号，多号不要共用同一个 ID。</li>
+            <li>token 短命是正常的：过期后重新走第 3 步贴新 token 即可，deviceId 不变。</li>
+          </ol>
+        </details>
+      </section>
+
+      <!-- ③ 自动签到设置 -->
+      <section class="card">
+        <div class="card-head"><h2>自动签到</h2></div>
+        <p class="hint">工具常驻后，每天到点自动给全部启用的账户查状态 + 签到（已签跳过），结果记到运行日志。若到点时电脑没开，下次启动后 30 秒内自动补签。失败自动重试 3 次（间隔 10s/30s），token 过期、9074 这类致命错误不重试，直接标红等你处理。本工具已是后台常驻（autoStart），关掉页面也不会停，托盘右键 → 后台工具可直达。</p>
+        <div class="field-grid">
+          <div class="field"><label for="c-hour">每天几点执行（0-23，-1=关闭）</label>
+            <input type="number" id="c-hour" min="-1" max="23" step="1" /></div>
+        </div>
+        <button type="button" id="btn-save-config" class="btn-primary btn-sm">保存设置</button>
+        <span id="config-feedback" class="inline-feedback"></span>
+      </section>
+
+      <!-- ④ 日志 -->
+      <section class="card">
+        <div class="card-head"><h2>运行日志</h2><button type="button" id="btn-logs" class="btn-ghost btn-sm">刷新</button></div>
+        <pre id="logs" class="logs">-</pre>
+        <p class="footnote">token 只存本机工具目录 <code>accounts.json</code> 明文，日志已脱敏。token 等同密码，不要截图外发；怀疑泄露去客户端重登即失效。</p>
+      </section>
+    </main>
+    <div id="toast" class="toast hidden"></div>
+    <script src="/front.js"></script>
+  </body>
+</html>

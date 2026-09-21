@@ -1,0 +1,10 @@
+{
+  "id": "quota-pool",
+  "name": "多号签到",
+  "version": "0.3.0",
+  "description": "WorkBuddy / Trae 多账户自动签到：查状态、幂等签到、token 刷新、每日定时",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0,
+  "autoStart": true
+}
