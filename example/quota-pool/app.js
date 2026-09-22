@@ -124,6 +124,13 @@ const ACCOUNTS_FILE = path.join(DIR, "accounts.json");
 const CONFIG_FILE = path.join(DIR, "config.json");
 const LOG_FILE = path.join(DIR, "pool.log");
 
+// Trae 扫码登录常量（与官方桌面端一致）
+const TRAE_CLIENT_ID = "en1oxy7wnw8j9n";
+const TRAE_APP_VERSION = "0.1.43";
+const TRAE_API_HOST = "https://api.trae.com.cn";
+const TRAE_LOGIN_BASE = "https://www.trae.cn/authorization";
+const TRAE_CALLBACK_URL = "http://127.0.0.1:18080/authorize";
+
 const DEFAULT_CONFIG = {
   autoSignHour: 9,       // 每天几点自动查+签（0-23，-1=关闭）；若该时间没开机，下次启动后补签
   lastAutoSignDay: "",   // 上次自动签到的本地日期（防重复）
@@ -175,8 +182,12 @@ function normalizeAccount(input, prev) {
   if (a.enabled === undefined) a.enabled = true;
   // 各类型凭据（空字符串视为清空）
   for (const k of ["accessToken", "refreshToken", "uid", "domain", "endpoint",
-    "token", "deviceId"]) {
+    "token", "deviceId", "machineId"]) {
     if (input[k] !== undefined) a[k] = String(input[k] || "").trim();
+  }
+  if (input.expiresAt !== undefined) {
+    const t = Number(input.expiresAt);
+    if (Number.isFinite(t)) a.expiresAt = t; // 到期时间，毫秒时间戳
   }
   if (!a.remark) throw new Error("请填写备注名（如：主力号/小号1），方便区分");
   if (a.type === "workbuddy" && !a.accessToken) throw new Error("WorkBuddy 账户缺少 accessToken");
@@ -206,6 +217,7 @@ function publicAccount(a) {
     accessToken: a.accessToken ? maskToken(a.accessToken) : "",
     refreshToken: a.refreshToken ? "已保存" : "",
     token: a.token ? maskToken(a.token) : "",
+    expiresAt: a.expiresAt || null,
     endpoint: a.endpoint || "",
     credits: a.credits ?? null,
     signinCredits: a.signinCredits ?? null,
@@ -492,6 +504,65 @@ async function wbRefresh(account, timeoutMs) {
 }
 
 // ------------------------------------------------------------------
+// Trae 扫码登录 + refreshToken 续期（免外部脚本，逻辑与官方 login.ps1 一致）
+// ------------------------------------------------------------------
+function safeJSON(s) {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch { /* 回调参数已由 URL 解码，直接解析即可 */ }
+  return null;
+}
+
+/** 读本机 TraeWork 已绑定的 deviceId（签到按它校验；没有则返回 ""） */
+function readTraeDeviceId() {
+  const cands = [
+    process.env.APPDATA && path.join(process.env.APPDATA, "TRAE SOLO CN", "ModularData", "ckg_server", "local_env.json"),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "TRAE SOLO CN", "ModularData", "ckg_server", "local_env.json"),
+  ].filter(Boolean);
+  for (const f of cands) {
+    try {
+      const j = JSON.parse(fs.readFileSync(f, "utf8").replace(/^\uFEFF/, ""));
+      if (j && j.device_id) return String(j.device_id);
+    } catch { /* 下一个 */ }
+  }
+  return "";
+}
+
+/** 用 refreshToken 换 access token（毫秒时间戳的 expiresAt 一起返回） */
+async function traeExchange(refreshToken, timeoutMs) {
+  const r = await upstreamRequest({
+    url: TRAE_API_HOST + "/cloudide/api/v3/trae/oauth/ExchangeToken",
+    method: "POST",
+    headers: { "User-Agent": "Trae/" + TRAE_APP_VERSION },
+    body: { ClientID: TRAE_CLIENT_ID, RefreshToken: refreshToken, ClientSecret: "-", UserID: "" },
+    timeoutMs,
+  });
+  const result = (r.json && (r.json.Result || r.json.result)) || {};
+  const token = result.Token || result.token || "";
+  if (!token) throw new Error("ExchangeToken 失败：refreshToken 无效或已过期，请重走扫码登录");
+  let exp = Number(result.TokenExpireAt || result.tokenExpireAt) || 0;
+  if (exp > 1e12) exp = Math.floor(exp / 1000); // 毫秒转秒
+  if (!exp || exp <= Date.now() / 1000) {
+    exp = Math.floor(Date.now() / 1000) + (Number(result.TokenExpireDuration) || 1209600);
+  }
+  return {
+    token,
+    refreshToken: result.RefreshToken || result.refreshToken || refreshToken,
+    expiresAt: exp * 1000,
+  };
+}
+
+async function traeUserInfo(token, timeoutMs) {
+  const r = await upstreamRequest({
+    url: TRAE_API_HOST + "/cloudide/api/v3/trae/GetUserInfo",
+    method: "POST",
+    headers: { "x-cloudide-token": token, "User-Agent": "Trae/" + TRAE_APP_VERSION },
+    body: { ReqSource: "IDE", IDEVersion: TRAE_APP_VERSION },
+    timeoutMs,
+  });
+  return (r.json && (r.json.Result || r.json.result)) || {};
+}
+
+// ------------------------------------------------------------------
 // 查状态 / 签到（单号）
 // ------------------------------------------------------------------
 async function checkOne(account, timeoutMs) {
@@ -718,14 +789,149 @@ const server = new ToolServer({
       const accounts = loadAccounts();
       const a = accounts.find((x) => x.id === id);
       if (!a) return res.json({ ok: false, error: "账户不存在" });
-      if (a.type !== "workbuddy") return res.json({ ok: false, error: "只有 WorkBuddy 需要刷新（Trae 请重贴 token，通用号请换 Key）" });
-      const r = await wbRefresh(a, 15000);
-      a.accessToken = r.accessToken;
-      if (r.refreshToken) a.refreshToken = r.refreshToken;
-      if (r.expiresAt) a.expiresAt = r.expiresAt;
-      a.lastError = ""; a.updatedAt = Date.now();
+      if (a.type === "workbuddy") {
+        const r = await wbRefresh(a, 15000);
+        a.accessToken = r.accessToken;
+        if (r.refreshToken) a.refreshToken = r.refreshToken;
+        if (r.expiresAt) a.expiresAt = r.expiresAt;
+        a.lastError = ""; a.updatedAt = Date.now();
+        saveAccounts(accounts);
+        appendLog(`刷新 token ${a.remark} 成功`);
+        return res.json({ ok: true, data: publicAccount(a) });
+      }
+      if (a.type === "trae") {
+        if (!a.refreshToken) {
+          return res.json({ ok: false, error: "该 Trae 号没有 refreshToken（内存抓的 JWT 自带不了），请走“扫码登录”重建" });
+        }
+        const r = await traeExchange(a.refreshToken, 15000);
+        a.token = r.token;
+        a.refreshToken = r.refreshToken;
+        a.expiresAt = r.expiresAt;
+        a.lastError = ""; a.updatedAt = Date.now();
+        saveAccounts(accounts);
+        appendLog(`刷新 token ${a.remark} 成功`);
+        return res.json({ ok: true, data: publicAccount(a) });
+      }
+      return res.json({ ok: false, error: "未知账户类型" });
+    }),
+
+    // 一键导入本机 WorkBuddy 登录态（只能导当前登录的这一个号）
+    "/api/accounts/import-local": asyncRoute(async (req, res) => {
+      const cands = [
+        process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info"),
+        process.env.APPDATA && path.join(process.env.APPDATA, "CodeBuddyExtension", "Data", "Public", "auth", "workbuddy-desktop.info"),
+      ].filter(Boolean);
+      let doc = null;
+      for (const f of cands) {
+        try {
+          doc = JSON.parse(fs.readFileSync(f, "utf8").replace(/^\uFEFF/, ""));
+          break;
+        } catch { /* 下一个 */ }
+      }
+      if (!doc) return res.json({ ok: false, error: "没找到本机登录态文件，请先在 WorkBuddy 客户端登录一次" });
+      const auth = doc.auth || {};
+      const account = doc.account || {};
+      if (!auth.accessToken) return res.json({ ok: false, error: "登录态文件里没有 accessToken，请在客户端重登" });
+      const uid = String(account.uid || account.uin || account.oneidAccountId || "");
+      const accounts = loadAccounts();
+      let a = uid ? accounts.find((x) => x.type === "workbuddy" && x.uid === uid) : null;
+      if (a) {
+        a.accessToken = auth.accessToken;
+        if (auth.refreshToken) a.refreshToken = auth.refreshToken;
+        if (!a.uid && uid) a.uid = uid;
+        a.updatedAt = Date.now();
+        appendLog(`一键导入更新 ${a.remark}`);
+      } else {
+        a = {
+          id: newId(), remark: "WorkBuddy-本机", type: "workbuddy", enabled: true,
+          accessToken: auth.accessToken, refreshToken: auth.refreshToken || "",
+          uid, domain: auth.domain || "",
+          createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        accounts.push(a);
+        appendLog("一键导入新增 WorkBuddy-本机");
+      }
       saveAccounts(accounts);
-      appendLog(`刷新 token ${a.remark} 成功`);
+      return res.json({ ok: true, data: publicAccount(a) });
+    }),
+
+    // Trae 扫码登录第 1 步：生成登录链接（优先复用本机已绑定 deviceId）
+    "/api/trae/login-url": asyncRoute(async (req, res) => {
+      const bound = readTraeDeviceId();
+      const deviceId = bound || crypto.randomBytes(8).toString("hex");
+      const machineId = crypto.randomBytes(8).toString("hex");
+      const traceId = crypto.randomBytes(4).toString("hex");
+      const params = {
+        login_version: "1", auth_from: "solo", login_channel: "native_ide",
+        plugin_version: "2.3.62834", auth_type: "local", client_id: TRAE_CLIENT_ID,
+        redirect: "0", login_trace_id: traceId, auth_callback_url: TRAE_CALLBACK_URL,
+        machine_id: machineId, device_id: deviceId,
+        x_device_id: deviceId, x_machine_id: machineId,
+        x_device_brand: "PC", x_device_type: "PC", x_os_version: "1.0",
+        x_app_version: TRAE_APP_VERSION, x_app_type: "stable",
+      };
+      const loginUrl = TRAE_LOGIN_BASE + "?" + new URLSearchParams(params).toString();
+      return res.json({ ok: true, data: { loginUrl, deviceId, machineId, reusedDevice: !!bound } });
+    }),
+
+    // Trae 扫码登录第 2 步：粘贴浏览器回调链接，换 token 并入库
+    "/api/trae/login-callback": asyncRoute(async (req, res, body) => {
+      const { callbackUrl, deviceId, machineId } = parseBody(body);
+      if (!callbackUrl || !deviceId) {
+        return res.json({ ok: false, error: "缺少回调链接或设备信息，请先点“生成登录链接”" });
+      }
+      let u;
+      try { u = new URL(String(callbackUrl).trim()); }
+      catch { return res.json({ ok: false, error: "回调链接格式不对，请复制浏览器地址栏的完整地址" }); }
+      const q = u.searchParams;
+      let refreshToken = q.get("refreshToken") || "";
+      const userInfo = safeJSON(q.get("userInfo")) || {};
+      const userJwt = safeJSON(q.get("userJwt")) || {};
+      if (!refreshToken && userJwt.RefreshToken) refreshToken = userJwt.RefreshToken;
+      const jwtToken = userJwt.Token || "";
+      if (!refreshToken && !jwtToken) {
+        return res.json({ ok: false, error: "回调里没有 refreshToken，请确认浏览器里已登录成功再复制地址" });
+      }
+      // 换 access token（优先 refreshToken，没有才用 userJwt 兜底）
+      let token = "", newRefresh = refreshToken, expiresAt = 0;
+      if (refreshToken) {
+        const ex = await traeExchange(refreshToken, 20000);
+        token = ex.token; newRefresh = ex.refreshToken; expiresAt = ex.expiresAt;
+      } else {
+        token = jwtToken;
+        let exp = Number(userJwt.TokenExpireAt) || 0;
+        if (exp > 1e12) exp = Math.floor(exp / 1000);
+        expiresAt = exp ? exp * 1000 : 0;
+      }
+      // 拿 uid/昵称
+      let uid = String(userInfo.UserID || "");
+      let nickname = String(userInfo.ScreenName || "");
+      try {
+        const ui = await traeUserInfo(token, 15000);
+        if (ui.UserID) {
+          uid = String(ui.UserID);
+          if (ui.ScreenName) nickname = String(ui.ScreenName);
+        }
+      } catch { /* 用回调里的信息 */ }
+      if (!uid) return res.json({ ok: false, error: "未能获取 uid，token 可能无效，请重走登录" });
+      const accounts = loadAccounts();
+      let a = accounts.find((x) => x.type === "trae" && x.uid === uid);
+      if (a) {
+        a.token = token; a.refreshToken = newRefresh; a.expiresAt = expiresAt;
+        a.deviceId = deviceId; if (machineId) a.machineId = machineId;
+        a.lastError = ""; a.updatedAt = Date.now();
+        appendLog(`扫码登录更新 ${a.remark}`);
+      } else {
+        a = {
+          id: newId(), remark: `Trae-${nickname || uid.slice(0, 6)}`, type: "trae", enabled: true,
+          token, refreshToken: newRefresh, expiresAt, uid,
+          deviceId, machineId: machineId || "",
+          createdAt: Date.now(), updatedAt: Date.now(),
+        };
+        accounts.push(a);
+        appendLog(`扫码登录新增 ${a.remark}`);
+      }
+      saveAccounts(accounts);
       return res.json({ ok: true, data: publicAccount(a) });
     }),
 

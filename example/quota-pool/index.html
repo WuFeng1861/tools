@@ -20,6 +20,27 @@
         </div>
       </header>
 
+      <!-- 快捷登录（免手动粘贴，不用下脚本） -->
+      <section class="card">
+        <div class="card-head"><h2>快捷登录（免手动粘贴）</h2></div>
+        <div class="field">
+          <label>WorkBuddy：直接读本机登录态</label>
+          <div><button type="button" id="btn-import-wb" class="btn-primary btn-sm">一键导入本机登录态</button></div>
+          <p class="hint">读取本机客户端已登录账号的 token 入池（只能导当前登录这一个，别人的号仍需手动贴）。</p>
+        </div>
+        <div class="field">
+          <label>Trae：扫码登录两步走</label>
+          <div><button type="button" id="btn-trae-url" class="btn-ghost btn-sm">1. 生成登录链接</button>
+          <button type="button" id="btn-copy-trae-url" class="btn-ghost btn-sm hidden">复制链接</button></div>
+          <p class="hint" id="trae-device-hint"></p>
+          <code id="trae-url" class="cmd hidden"></code>
+          <p class="hint">在浏览器打开链接完成登录，成功后地址栏会跳到打不开的 127.0.0.1，把完整地址复制回来：</p>
+          <textarea id="trae-callback" rows="2" spellcheck="false" placeholder="粘贴浏览器地址栏的完整回调链接"></textarea>
+          <div style="margin-top:8px"><button type="button" id="btn-trae-done" class="btn-primary btn-sm">2. 完成登录并加入池子</button></div>
+        </div>
+        <div id="quick-feedback" class="banner hidden"></div>
+      </section>
+
       <!-- ① 账户列表 -->
       <section class="card">
         <div class="card-head">

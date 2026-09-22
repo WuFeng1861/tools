@@ -14,6 +14,11 @@
     jwt: $("f-jwt"), device: $("f-device"),
     formFeedback: $("form-feedback"),
     btnCancelForm: $("btn-cancel-form"),
+    btnImportWb: $("btn-import-wb"),
+    btnTraeUrl: $("btn-trae-url"), traeUrl: $("trae-url"),
+    btnCopyTraeUrl: $("btn-copy-trae-url"), traeDeviceHint: $("trae-device-hint"),
+    traeCallback: $("trae-callback"), btnTraeDone: $("btn-trae-done"),
+    quickFeedback: $("quick-feedback"),
     cHour: $("c-hour"),
     btnSaveConfig: $("btn-save-config"), configFeedback: $("config-feedback"),
     btnLogs: $("btn-logs"), logs: $("logs"),
@@ -21,8 +26,8 @@
   };
 
   const TYPE_HINTS = {
-    workbuddy: "WorkBuddy：必填备注 + accessToken（refreshToken 强烈建议一起填，否则 60 天后需重贴）。",
-    trae: "Trae：必填备注 + token(JWT) + deviceId（该账号绑定过的设备，错了 9074）。",
+    workbuddy: "WorkBuddy：必填备注 + accessToken（refreshToken 强烈建议一起填，否则 60 天后需重贴）。本机号更建议用上方“一键导入”。",
+    trae: "Trae：必填备注 + token(JWT) + deviceId（该账号绑定过的设备，错了 9074）。新号更建议用上方“扫码登录”，自带 refreshToken，过期可一键刷新。",
   };
 
   function toast(msg, isErr) {
@@ -67,6 +72,53 @@
   }
   els.typeSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => setType(b.dataset.type)));
 
+  function fmtExpiry(ts) {
+    if (!ts) return "";
+    const d = new Date(Number(ts));
+    return `${d.getMonth() + 1}/${d.getDate()} 到期`;
+  }
+
+  // ---------- 快捷登录 ----------
+  els.btnImportWb.addEventListener("click", async () => {
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/accounts/import-local", { method: "POST", body: "{}" });
+      banner(els.quickFeedback, true, `已导入 ${r.data.remark}，建议点一次“检查”确认。`);
+      loadAccounts();
+    } catch (e) { banner(els.quickFeedback, false, "导入失败：" + e.message); }
+  });
+  els.btnTraeUrl.addEventListener("click", async () => {
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/trae/login-url", { method: "POST", body: "{}" });
+      state.traeLogin = { deviceId: r.data.deviceId, machineId: r.data.machineId };
+      els.traeUrl.textContent = r.data.loginUrl;
+      els.traeUrl.classList.remove("hidden");
+      els.btnCopyTraeUrl.classList.remove("hidden");
+      els.traeDeviceHint.textContent = r.data.reusedDevice
+        ? "已复用本机已绑定的 deviceId，直接登录即可。"
+        : "本机没找到已绑定 deviceId，将用随机 ID，签到可能 9074——建议先在 TraeWork 桌面端登录该账号一次再重生成。";
+    } catch (e) { banner(els.quickFeedback, false, "生成失败：" + e.message); }
+  });
+  els.btnCopyTraeUrl.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(els.traeUrl.textContent); toast("已复制登录链接"); }
+    catch { toast("复制失败，请手动复制", true); }
+  });
+  els.btnTraeDone.addEventListener("click", async () => {
+    const cb = els.traeCallback.value.trim();
+    if (!cb) { banner(els.quickFeedback, false, "请先粘贴浏览器回调链接"); return; }
+    if (!state.traeLogin) { banner(els.quickFeedback, false, "请先点“生成登录链接”"); return; }
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/trae/login-callback", {
+        method: "POST",
+        body: JSON.stringify({ callbackUrl: cb, deviceId: state.traeLogin.deviceId, machineId: state.traeLogin.machineId }),
+      });
+      banner(els.quickFeedback, true, `登录成功：${r.data.remark}，已加入池子。`);
+      els.traeCallback.value = "";
+      loadAccounts();
+    } catch (e) { banner(els.quickFeedback, false, "登录失败：" + e.message); }
+  });
   // ---------- 列表 ----------
   function statusBadge(a) {
     if (a.enabled === false) return '<span class="badge mute">停用</span>';
@@ -99,7 +151,7 @@
       els.acctBody.innerHTML = list.map((a) => `
         <tr>
           <td><div class="row-remark">${esc(a.remark)}</div>
-            <div class="row-sub">${esc(a.id)}${a.cooldownUntil > Date.now() ? " · 冷却至 " + fmtTime(a.cooldownUntil) : ""}</div></td>
+            <div class="row-sub">${esc(a.id)}${a.expiresAt ? " · " + esc(fmtExpiry(a.expiresAt)) : ""}${a.cooldownUntil > Date.now() ? " · 冷却至 " + fmtTime(a.cooldownUntil) : ""}</div></td>
           <td>${esc(a.type)}${a.enabled === false ? "（停用）" : ""}</td>
           <td>${statusBadge(a)}${a.lastError ? `<div class="row-sub">${esc(a.lastError)}</div>` : ""}</td>
           <td>${quotaText(a)}</td>
@@ -107,7 +159,7 @@
           <td><div class="row-actions">
             <button class="mini" data-act="check" data-id="${esc(a.id)}">检查</button>
             ${(a.type === "workbuddy" || a.type === "trae") ? `<button class="mini" data-act="claim" data-id="${esc(a.id)}">签到</button>` : ""}
-            ${a.type === "workbuddy" ? `<button class="mini" data-act="refresh" data-id="${esc(a.id)}">刷新</button>` : ""}
+            ${(a.type === "workbuddy" || a.type === "trae") ? `<button class="mini" data-act="refresh" data-id="${esc(a.id)}">刷新</button>` : ""}
             <button class="mini" data-act="toggle" data-id="${esc(a.id)}">${a.enabled === false ? "启用" : "停用"}</button>
             <button class="mini" data-act="edit" data-id="${esc(a.id)}">编辑</button>
             <button class="mini danger" data-act="del" data-id="${esc(a.id)}">删除</button>
