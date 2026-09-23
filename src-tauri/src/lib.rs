@@ -94,6 +94,11 @@ pub fn run() {
         .manage(sidecar::Sidecar::default())
         .manage(SettingsState::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        // 单实例：重复启动时不再起第二个平台，直接唤起已有主界面并退出
+        // （否则会出现两个托盘、两套后台工具、签到跑两遍）
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 // 自启命令带 --autostart，启动时据此不弹主界面、直接进托盘

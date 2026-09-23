@@ -147,9 +147,13 @@ function writeJSON(file, obj) {
   try { fs.renameSync(tmp, file); }
   catch { fs.copyFileSync(tmp, file); fs.unlinkSync(tmp); }
 }
+function localTimestamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
 function appendLog(line) {
-  const ts = new Date().toISOString().replace("T", " ").slice(0, 19);
-  try { fs.appendFileSync(LOG_FILE, `[${ts}] ${line}\n`); } catch { /* 忽略 */ }
+  try { fs.appendFileSync(LOG_FILE, `[${localTimestamp()}] ${line}\n`); } catch { /* 忽略 */ }
 }
 
 function loadAccounts() {
@@ -633,10 +637,47 @@ async function claimWithRetry(account, timeoutMs, tries, tag) {
 // 每日自动签到（best-effort，失败只记日志）
 // ------------------------------------------------------------------
 let lastAutoSignDay = "";
+let schedulerWarned = false;
 function localDay(d) {
   return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 }
+
+/** 单实例定时锁：同一时间只允许一个进程跑自动签到（多开会导致重复签到甚至 10001） */
+const LOCK_FILE = path.join(DIR, "scheduler.lock");
+function acquireSchedulerRole() {
+  let cur = null;
+  try { cur = JSON.parse(fs.readFileSync(LOCK_FILE, "utf8").replace(/^\uFEFF/, "")); } catch { /* 无锁 */ }
+  if (cur && cur.pid && cur.pid !== process.pid) {
+    let alive = false;
+    try { process.kill(cur.pid, 0); alive = true; } catch { /* 进程已死，接管 */ }
+    if (alive) {
+      if (!schedulerWarned) {
+        schedulerWarned = true;
+        appendLog(`检测到另一实例（pid=${cur.pid}）已在跑定时，本实例只提供界面不重复签到`);
+      }
+      return false;
+    }
+  }
+  try { fs.writeFileSync(LOCK_FILE, JSON.stringify({ pid: process.pid, at: Date.now() })); } catch { /* 忽略 */ }
+  return true;
+}
+
+/** 签到成功后顺手刷新额度/状态并落盘，界面不用再点检查 */
+async function refreshStatusInto(id, timeoutMs, tag) {
+  const accounts = loadAccounts();
+  const a = accounts.find((x) => x.id === id);
+  if (!a) return;
+  const st = await checkOne(a, timeoutMs);
+  const patch = { lastCheck: Date.now() };
+  if (typeof st.credits === "number") patch.credits = st.credits;
+  if (typeof st.signinCredits === "number") patch.signinCredits = st.signinCredits;
+  if (typeof st.checkedIn === "boolean") patch.checkedIn = st.checkedIn;
+  if (Array.isArray(st.resources)) patch.resources = st.resources;
+  persistCheckResult(id, patch);
+}
+
 async function autoSignTick() {
+  if (!acquireSchedulerRole()) return;
   const cfg = loadConfig();
   if (cfg.autoSignHour === -1) return;
   const now = new Date();
@@ -655,6 +696,11 @@ async function autoSignTick() {
     const r = await claimWithRetry(a, 15000, 3, "自动签到");
     if (r.ok) {
       persistCheckResult(a.id, { lastSign: Date.now(), lastError: "" });
+      try {
+        await refreshStatusInto(a.id, 15000);
+      } catch (e) {
+        appendLog(`自动签到 ${a.remark}：签后额度刷新失败，下次检查时更新：${String((e && e.message) || e).slice(0, 120)}`);
+      }
       appendLog(`自动签到 ${a.remark}：${r.result.skipped ? r.result.reason : "成功"}`);
     } else {
       persistCheckResult(a.id, { lastError: r.error });
@@ -773,7 +819,8 @@ const server = new ToolServer({
       for (const a of list) {
         const r = await claimWithRetry(a, 15000, 3, "手动签到");
         if (r.ok) {
-          persistCheckResult(a.id, { lastSign: Date.now(), lastError: "", checkedIn: true });
+          persistCheckResult(a.id, { lastSign: Date.now(), lastError: "" });
+          try { await refreshStatusInto(a.id, 15000); } catch { /* 额度下次检查再更新 */ }
           appendLog(`手动签到 ${a.remark}：${r.result.skipped ? r.result.reason : "成功"}`);
           out.push({ id: a.id, remark: a.remark, ok: true, ...r.result });
         } else {
