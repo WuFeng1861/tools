@@ -141,7 +141,7 @@ onUnmounted(async () => {
       <iframe
         :src="`http://127.0.0.1:${tool.port}`"
         class="tool-frame"
-        sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups"
+        sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"
       />
     </main>
     <main v-else class="frame placeholder">

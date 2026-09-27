@@ -316,6 +316,7 @@ server.start();          // 自动监听 process.env.TOOL_PORT，也可自定义
 
 - 宿主失联：Rust 检测到宿主进程退出 → 自动重启宿主 → 前端提示"运行时已重启，工具已全部停止"。
 - 重复启动：`tauri-plugin-single-instance` 保证单实例，第二个进程直接唤起已有主界面并退出（否则会出现两个托盘、两套后台工具、签到跑两遍）。
+- 工具存文件：工具写 `toolbox/<id>/.save-request.json`（{id, filename, content}，≤5MB）→ Rust 弹原生“另存为” → 回写 `.save-response.json`（{id, ok, path|error}）。给沙盒 iframe 里的工具一个弹系统弹窗存文件的通道（网页 File System API 在沙盒里会 SecurityError）。
 - 端口冲突：`portpool` 分配前先探测；工具退出后回收端口。
 - 工具崩溃：捕获 exit 事件 → 事件 `tool-exited` → 前端状态更新 + 可查日志。
 - npm 安装失败：把 npm 的 stderr 摘要回传前端展示。

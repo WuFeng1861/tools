@@ -996,6 +996,81 @@ const server = new ToolServer({
       return res.json({ ok: true, data: cfg });
     }),
 
+    // 导出：全量账户（含 token 明文，妥善保管）
+    "/api/accounts/export": (req, res) => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      const fname = `quota-pool-accounts-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.json`;
+      const payload = JSON.stringify(
+        { app: "quota-pool", version: 1, exportedAt: Date.now(), accounts: loadAccounts() }, null, 2);
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${fname}"`,
+      });
+      res.end(payload);
+    },
+
+    // 经平台原生弹窗另存为：写 .save-request.json → Rust 弹对话框 → 轮询 .save-response.json。
+    // 沙盒 iframe 调不起网页弹窗时走这里；旧平台无此桥接会 120 秒超时并明示。
+    "/api/accounts/export-save": asyncRoute(async (req, res) => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      const fname = `quota-pool-accounts-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.json`;
+      const payload = JSON.stringify(
+        { app: "quota-pool", version: 1, exportedAt: Date.now(), accounts: loadAccounts() }, null, 2);
+      const id = crypto.randomBytes(8).toString("hex");
+      const reqFile = path.join(DIR, ".save-request.json");
+      const respFile = path.join(DIR, ".save-response.json");
+      try { fs.unlinkSync(respFile); } catch { /* 忽略残留 */ }
+      fs.writeFileSync(reqFile, JSON.stringify({ id, filename: fname, content: payload }), "utf8");
+      const deadline = Date.now() + 120000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 500));
+        let resp = null;
+        try { resp = JSON.parse(fs.readFileSync(respFile, "utf8")); } catch { /* 还没回 */ }
+        if (resp && resp.id === id) {
+          try { fs.unlinkSync(respFile); } catch { /* 忽略 */ }
+          if (resp.ok) {
+            appendLog(`导出已保存：${resp.path}`);
+            return res.json({ ok: true, data: { path: resp.path } });
+          }
+          return res.json({ ok: false, error: resp.error || "保存失败" });
+        }
+      }
+      return res.json({ ok: false, error: "等系统弹窗超时：平台太旧（不支持原生存盘桥）或 120 秒无操作，请更新平台后重试" });
+    }),
+
+    // 导入：追加模式，同类型+同备注跳过，单条非法不影响其他
+    "/api/accounts/import": asyncRoute(async (req, res, body) => {
+      const p = parseBody(body);
+      const list = Array.isArray(p) ? p : p.accounts;
+      if (!Array.isArray(list) || !list.length) {
+        return res.json({ ok: false, error: "文件里没有账户数组" });
+      }
+      if (list.length > 200) return res.json({ ok: false, error: "一次最多导入 200 个" });
+      const accounts = loadAccounts();
+      const ok = [], fail = [];
+      list.forEach((raw, i) => {
+        try {
+          if (!raw || typeof raw !== "object") throw new Error("不是账户对象");
+          const na = normalizeAccount({ enabled: true, ...raw }, null);
+          if (accounts.some((x) => x.type === na.type && x.remark === na.remark)) {
+            fail.push({ index: i, remark: na.remark, error: "已存在同名同类型账户，已跳过" });
+            return;
+          }
+          na.id = newId();
+          na.createdAt = Date.now(); na.updatedAt = Date.now();
+          accounts.push(na);
+          ok.push(na.remark);
+        } catch (e) {
+          fail.push({ index: i, remark: String((raw && raw.remark) || ""), error: String((e && e.message) || e).slice(0, 120) });
+        }
+      });
+      saveAccounts(accounts);
+      appendLog(`导入账户：成功 ${ok.length}，失败/跳过 ${fail.length}`);
+      return res.json({ ok: true, data: { ok, fail } });
+    }),
+
     "/api/logs": (req, res) => {
       const url = new URL(req.url, "http://localhost");
       const tail = Math.min(Math.max(Number(url.searchParams.get("tail")) || 200, 1), 2000);

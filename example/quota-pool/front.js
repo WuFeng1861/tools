@@ -8,6 +8,7 @@
     acctEmpty: $("acct-empty"), acctTable: $("acct-table"), acctBody: $("acct-body"),
     acctFeedback: $("acct-feedback"),
     btnAdd: $("btn-add"), btnCheckAll: $("btn-check-all"), btnClaimAll: $("btn-claim-all"),
+    btnExport: $("btn-export"), btnImport: $("btn-import"), fileImport: $("file-import"),
     form: $("acct-form"), formTitle: $("form-title"), typeSeg: $("f-type-seg"),
     typeHint: $("type-hint"), remark: $("f-remark"),
     access: $("f-access"), refresh: $("f-refresh"), uid: $("f-uid"), endpoint: $("f-endpoint"),
@@ -268,6 +269,105 @@
     } catch (e) {
       banner(els.formFeedback, false, "保存失败：" + e.message);
     } finally { state.busy = false; }
+  });
+
+  // ---------- 导入/导出 ----------
+  // 三档：①网页系统弹窗（独立浏览器里可用）→ ②平台原生弹窗（经工具后端文件桥接，
+  // 沙盒 iframe 下的主力通道）→ ③静默下载（最后兜底）。
+  async function pickSaveFile(suggestedName) {
+    if (typeof window.showSaveFilePicker !== "function") {
+      return { status: "unsupported", reason: "当前页面不支持网页弹窗 API" };
+    }
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: "JSON 文件", accept: { "application/json": [".json"] } }],
+      });
+      return { status: "picked", handle };
+    } catch (e) {
+      if (e && e.name === "AbortError") return { status: "cancelled" };
+      return { status: "unsupported", reason: "网页弹窗被拦截：" + ((e && e.name) || e) };
+    }
+  }
+  async function blobFallback(name) {
+    const resp = await fetch("/api/accounts/export");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  els.btnExport.addEventListener("click", async () => {
+    const name = "quota-pool-accounts.json";
+    // ① 网页弹窗（手势有效期内先占住）
+    const picked = await pickSaveFile(name);
+    if (picked.status === "cancelled") return;
+    try {
+      const resp = await fetch("/api/accounts/export");
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const blob = await resp.blob();
+      if (picked.status === "picked") {
+        const w = await picked.handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        toast("已保存（文件含 token 明文，妥善保管）");
+        return;
+      }
+    } catch (e) {
+      banner(els.acctFeedback, false, "导出失败：" + e.message);
+      return;
+    }
+    // ② 平台原生弹窗（文件桥接，需新版平台）
+    banner(els.acctFeedback, true, "");
+    toast("正在请求系统“另存为”窗口…");
+    try {
+      const r = await api("/api/accounts/export-save", { method: "POST", body: "{}" });
+      if (r.ok !== true) throw new Error(r.error || "保存失败");
+      toast("已保存（文件含 token 明文，妥善保管）");
+      banner(els.acctFeedback, true, "已保存到：" + r.data.path);
+      return;
+    } catch (e) {
+      const msg = e.message || "";
+      if (/取消/.test(msg)) {
+        banner(els.acctFeedback, true, "");
+        toast("已取消");
+        return;
+      }
+      if (!/超时|太旧/.test(msg)) {
+        banner(els.acctFeedback, false, "导出失败：" + msg);
+        return;
+      }
+      // 旧平台无桥接 → ③ 静默下载兜底
+    }
+    try {
+      await blobFallback(name);
+      toast("已导出到默认下载目录（含 token 明文，妥善保管）");
+      banner(els.acctFeedback, false,
+        "没弹出系统“另存为”窗口（" + picked.reason + "），且平台版本过旧无原生桥接，已回退默认下载。" +
+        "请更新平台后重试，或去下载目录查找文件。");
+    } catch (e) { banner(els.acctFeedback, false, "导出失败：" + e.message); }
+  });
+  els.btnImport.addEventListener("click", () => els.fileImport.click());
+  els.fileImport.addEventListener("change", async () => {
+    const f = els.fileImport.files && els.fileImport.files[0];
+    els.fileImport.value = "";
+    if (!f) return;
+    try {
+      const text = await f.text();
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { throw new Error("文件不是合法 JSON"); }
+      const r = await api("/api/accounts/import", { method: "POST", body: JSON.stringify(parsed) });
+      const okN = (r.data.ok || []).length;
+      const fails = r.data.fail || [];
+      banner(els.acctFeedback, fails.length === 0,
+        `导入完成：成功 ${okN}，失败/跳过 ${fails.length}` +
+        (fails.length ? "：" + fails.map((x) => `${x.remark || "#" + x.index}（${x.error}）`).join("；") : ""));
+      loadAccounts();
+    } catch (e) { banner(els.acctFeedback, false, "导入失败：" + e.message); }
   });
 
   // ---------- 批量 ----------

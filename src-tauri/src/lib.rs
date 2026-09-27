@@ -15,6 +15,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::webview::WebviewWindowBuilder;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::{DialogExt, FilePath};
 use tauri_plugin_global_shortcut::{
     Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
 };
@@ -99,6 +100,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_autostart::Builder::new()
                 // 自启命令带 --autostart，启动时据此不弹主界面、直接进托盘
@@ -170,6 +172,7 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                     poll_panel_flags(&app2).await;
+                    poll_save_requests(&app2).await;
                 }
             });
             Ok(())
@@ -710,6 +713,95 @@ fn read_panel_id_flag(path: &PathBuf) -> String {
             .unwrap_or_else(|| "quick".to_string()),
         Err(_) => "quick".to_string(),
     }
+}
+
+/// 轮询各工具目录的存盘请求：工具写 `.save-request.json`（{id, filename, content}）
+/// → 平台弹原生“另存为” → 结果回写 `.save-response.json`（{id, ok, path|error}）。
+/// 背景：工具界面是沙盒 iframe，网页的 showSaveFilePicker 会 SecurityError，
+/// 工具后端又是无界面的 Node，只能经由这个文件桥拿到原生弹窗。
+async fn poll_save_requests(app: &AppHandle) {
+    let Ok(dir) = sidecar::Sidecar::data_dir(app) else { return };
+    let toolbox = dir.join("toolbox");
+    let Ok(entries) = fs::read_dir(&toolbox) else { return };
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let req_path = entry.path().join(".save-request.json");
+        let raw = match fs::read_to_string(&req_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let _ = fs::remove_file(&req_path); // 先认领，避免重复弹窗
+        let v: serde_json::Value = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let id = v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let filename =
+            sanitize_filename(v.get("filename").and_then(|x| x.as_str()).unwrap_or("download.dat"));
+        let content = v
+            .get("content")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tool_dir = entry.path();
+        if content.len() > 5 * 1024 * 1024 {
+            write_save_response(&tool_dir, &id, false, "文件过大（>5MB），拒绝保存");
+            continue;
+        }
+        // 弹窗是阻塞调用，扔到 blocking 线程，别卡住轮询
+        let handle = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let picked = handle.dialog().file().set_file_name(&filename).blocking_save_file();
+            match picked {
+                Some(FilePath::Path(p)) => match fs::write(&p, content.as_bytes()) {
+                    Ok(()) => write_save_response(&tool_dir, &id, true, &p.to_string_lossy()),
+                    Err(e) => write_save_response(&tool_dir, &id, false, &format!("写入失败：{e}")),
+                },
+                Some(FilePath::Url(_)) => {
+                    write_save_response(&tool_dir, &id, false, "不支持的保存位置")
+                }
+                None => write_save_response(&tool_dir, &id, false, "用户取消"),
+            }
+        });
+    }
+}
+
+/// 存盘文件名消毒：只留文件名本体，防止目录穿越
+fn sanitize_filename(raw: &str) -> String {
+    let base = raw.replace(['/', '\\'], "_");
+    let base: String = base.chars().filter(|c| !c.is_control()).collect();
+    let base = base.trim().trim_start_matches('.').to_string();
+    if base.is_empty() || base.len() > 128 {
+        return "download.dat".to_string();
+    }
+    base
+}
+
+fn write_save_response(tool_dir: &PathBuf, id: &str, ok: bool, path_or_error: &str) {
+    let mut map = serde_json::Map::new();
+    map.insert("id".to_string(), serde_json::Value::String(id.to_string()));
+    map.insert("ok".to_string(), serde_json::Value::Bool(ok));
+    if ok {
+        map.insert(
+            "path".to_string(),
+            serde_json::Value::String(path_or_error.to_string()),
+        );
+    } else {
+        map.insert(
+            "error".to_string(),
+            serde_json::Value::String(path_or_error.to_string()),
+        );
+    }
+    let _ = fs::write(
+        tool_dir.join(".save-response.json"),
+        serde_json::Value::Object(map).to_string(),
+    );
 }
 
 // ------------------------------------------------------------------ 快捷键注册表
