@@ -18,19 +18,41 @@ const showLogs = ref(false);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let currentId = "";
 
-/** 启动工具并加载其页面 */
+/** 启动工具并加载其页面（失败自动重试：清掉残留状态再起，最多 3 次） */
 async function openTool() {
   starting.value = true;
   error.value = "";
+  const myId = currentId;
   try {
-    tool.value = await api.startTool(currentId);
-    if (tool.value.status === "error") {
-      error.value = tool.value.error || "工具启动失败";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (myId !== currentId) return; // 期间切到别的工具了，不再继续
+      if (attempt > 0) {
+        // 重试前先停掉残留状态（这正是“重新加载”按钮手动做的事）
+        try {
+          await api.stopTool(myId);
+        } catch {
+          /* 忽略 */
+        }
+        await new Promise((r) => setTimeout(r, 800));
+      }
+      try {
+        const t = await api.startTool(myId);
+        if (myId !== currentId) return;
+        tool.value = t;
+        if (t.status === "running" && t.port) return; // 成功
+        throw new Error(t.status === "error" ? t.error || "工具启动失败" : "工具未能进入运行状态");
+      } catch (e) {
+        if (attempt >= 2 || myId !== currentId) {
+          if (myId === currentId) {
+            error.value = (e as Error)?.message ?? String(e);
+          }
+          return;
+        }
+        // 否则循环自动重试，不打扰用户
+      }
     }
-  } catch (e) {
-    error.value = (e as Error)?.message ?? String(e);
   } finally {
-    starting.value = false;
+    if (myId === currentId) starting.value = false;
   }
 }
 

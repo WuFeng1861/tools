@@ -136,6 +136,16 @@ http.createServer((req, res) => {
       </section>
 
       <section class="block">
+        <h2>单实例：后台/托盘出现两个平台怎么办</h2>
+        <p>平台是单实例的：重复启动不会再起第二个，只会唤起已有主界面。如果还是看到两个托盘图标/两套后台工具，说明 running 的是<strong>两个不同版本</strong>（最常见：开发版 <code>tauri dev</code> 和安装版同时开着）。</p>
+        <ul>
+          <li>先确认：任务管理器里找 <code>ToolPlatform</code> / <code>tools.exe</code>，只留一个。</li>
+          <li>托盘多出来的图标：鼠标悬停上去一般会自动消失（Windows 残留）。</li>
+          <li>签到类工具如果跑了两份，会同时签到甚至被官方限流（code=10001）；多号签到工具自带单实例定时锁，第二个进程只提供界面、不重复跑定时。</li>
+        </ul>
+      </section>
+
+      <section class="block">
         <h2>全局快捷键（manifest 声明 + 统一管理）</h2>
         <p><strong>任意工具</strong>都可以在 <code>manifest.json</code> 里用 <code>shortcuts</code> 数组声明<strong>多个</strong>全局快捷键，每个对应一个不同动作。平台启动时读取并按你声明的组合键注册为<strong>系统级全局快捷键</strong>。</p>
         <pre><code>// manifest.json —— 声明一把快捷键
@@ -189,6 +199,23 @@ server.route("/__platform/shortcut", (req, res, body) => {
       </section>
 
       <section class="block">
+        <h2>原生“另存为”弹窗：给工具的文件存盘通道</h2>
+        <p>工具界面是沙盒 <code>iframe</code>，网页的 <code>showSaveFilePicker</code> 会 <code>SecurityError</code>，静默下载也可能被沙盒拦掉。需要让用户选位置存文件时，走<strong>文件桥</strong>（和面板标记同模式）：工具后端写请求文件 → 平台弹原生“另存为” → 结果回写响应文件。</p>
+        <pre><code>// 工具后端 app.js —— 请求平台弹“另存为”存一段文本
+const reqId = crypto.randomBytes(8).toString("hex");
+fs.writeFileSync(path.join(__dirname, ".save-request.json"),
+  JSON.stringify({ id: reqId, filename: "导出.json", content: text }));
+// 之后轮询 .save-response.json（同 id）：
+// { id, ok: true, path } 或 { id, ok: false, error }，读到后删掉响应文件</code></pre>
+        <ul>
+          <li>文件名会被消毒（只留本体，防目录穿越），内容上限 5MB。</li>
+          <li>用户取消也算一种正常返回（<code>ok: false, error: "用户取消"</code>），前端别当报错弹。</li>
+          <li>平台每 400ms 扫描一次；前端拿不到响应超过 120 秒就提示用户重试（一般是平台版本太旧）。</li>
+          <li>网页弹窗 → 平台原生弹窗 → 静默下载，三档兜底都写上，用户体验最稳。</li>
+        </ul>
+      </section>
+
+      <section class="block">
         <h2>给自己的工具加「全局快捷键 / 悬浮面板」</h2>
         <ol>
           <li>在 <code>manifest.json</code> 加 <code>shortcuts</code>（声明快捷键）和可选 <code>panels</code>（声明悬浮面板）。</li>
@@ -210,12 +237,26 @@ server.route("/__platform/shortcut", (req, res, body) => {
       </section>
 
       <section class="block">
+        <h2>多号签到工具（示例）</h2>
+        <p>WorkBuddy / Trae 多账户自动签到，展示“后台常驻 + 定时任务 + 文件桥导出”的组合用法，放在 <code>example/quota-pool/</code>：</p>
+        <ul>
+          <li><strong>快捷登录</strong>：WorkBuddy 点“一键导入本机登录态”（直接读客户端会话文件）；Trae 点“生成登录链接”→ 浏览器登录 → 粘贴回调地址，全程不用下脚本，还自带 <code>refreshToken</code>。</li>
+          <li><strong>自动签到</strong>：每天指定时间跑一次，已签跳过；到点没开机下次启动 30 秒内补签；临时错误自动重试 3 次（间隔 10s/30s），token 过期、9074 这类致命错误直接标红。</li>
+          <li><strong>单实例定时锁</strong>：<code>scheduler.lock</code> 保证同一时间只有一个进程跑定时，多开只提供界面。</li>
+          <li><strong>导入/导出</strong>：账户池可导出 JSON 迁移（导出走上面的三档存盘通道），导入按“同类型+同备注”去重。</li>
+          <li><strong>额度口径</strong>：剩余额度走用量/资源接口，WorkBuddy 按“周期剩”汇总（和客户端一致），分包明细可展开对账。</li>
+        </ul>
+      </section>
+
+      <section class="block">
         <h2>常见问题</h2>
         <ul>
           <li><strong>id 不能改吗？</strong> 可以，但只能用小写字母/数字/<code>-</code>/<code>_</code>，且 id 就是目录名。</li>
           <li><strong>端口冲突？</strong> 用默认 <code>port: 0</code>，运行时自动分配空闲端口。</li>
           <li><strong>能不能用外部编辑器？</strong> 可以，工具目录就在 <code>%APPDATA%\com.tools.platform\toolbox\</code>，外部写好后点「刷新」即可。</li>
           <li><strong>工具能互相通信吗？</strong> 默认隔离；如需共享数据，可把中间结果写到文件或调用对方的 <code>127.0.0.1:端口</code>。</li>
+          <li><strong>导出没弹“另存为”？</strong> 沙盒里网页弹窗一定会被禁，这是预期的三档兜底：先看提示条里的原因；平台够新会自动走原生弹窗；都没有才落默认下载目录。</li>
+          <li><strong>后台出现两个平台？</strong> 见上面「单实例」一节：只留一个进程，托盘残留图标悬停即消失。</li>
         </ul>
       </section>
     </main>

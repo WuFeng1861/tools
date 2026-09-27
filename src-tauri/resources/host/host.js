@@ -93,6 +93,34 @@ function isPortFree(port) {
   });
 }
 
+/** 探测端口是否已在监听（短连接，成功即关） */
+function isPortListening(port, timeoutMs = 300) {
+  return new Promise((resolve) => {
+    const sock = net.createConnection({ host: "127.0.0.1", port }, () => {
+      try { sock.destroy(); } catch { /* 忽略 */ }
+      resolve(true);
+    });
+    const done = (v) => {
+      try { sock.destroy(); } catch { /* 忽略 */ }
+      resolve(v);
+    };
+    sock.once("error", () => done(false));
+    sock.setTimeout(timeoutMs, () => done(false));
+  });
+}
+
+/** 等待工具真正开始监听（轮询 TCP，默认最多 4 秒）；进程中途退出直接返回 false */
+async function waitForListen(port, proc, timeoutMs = 4000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (proc.exitCode != null) return false;
+    if (await isPortListening(port, 200)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (proc.exitCode != null) return false;
+  return isPortListening(port, 300);
+}
+
 /** 随机端口池 */
 class PortPool {
   constructor(range) {
@@ -111,10 +139,12 @@ class PortPool {
     for (let i = 0; i < 200; i++) {
       const p =
         this.start + Math.floor(Math.random() * (this.end - this.start));
-      if (!this.used.has(p) && (await isPortFree(p))) {
-        this.used.add(p);
+      if (this.used.has(p)) continue;
+      this.used.add(p); // 先同步占位：await 期间别的并发分配看得到，不会撞车
+      if (await isPortFree(p)) {
         return p;
       }
+      this.used.delete(p);
     }
     throw new Error("无法分配空闲端口");
   }
@@ -366,6 +396,18 @@ async function startTool(id) {
     pool.release(port);
     throw new Error(
       `工具启动后立即退出：\n${ring.lines().slice(-8).join("\n")}`,
+    );
+  }
+
+  // 回探测：确认端口真的在监听。300ms 时进程活着不代表监听成功
+  //（EADDRINUSE、启动后异步崩溃都会造成“假 running”，前端 iframe 打不开、
+  // 卡在“准备就绪”直到手动重载）。失败则清理并直接报错，由前端自动重试。
+  if (!(await waitForListen(port, proc, 4000))) {
+    runtimes.delete(id);
+    pool.release(port);
+    killTree(proc.pid);
+    throw new Error(
+      `工具未能正常监听端口 ${port}（进程可能已退出）：\n${ring.lines().slice(-8).join("\n")}`,
     );
   }
 
