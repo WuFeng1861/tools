@@ -1,0 +1,16 @@
+{
+  "id": "consciousness-stream",
+  "name": "即意",
+  "version": "0.1.0",
+  "description": "随手记录脑海中闪过的每一个念头（意识流清单）；全局热键唤起悬浮面板，支持多清单、已完成、主题色。",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0,
+  "autoStart": true,
+  "shortcuts": [
+    { "id": "toggle-panel", "name": "唤起 / 收起 即意", "accel": "alt+x", "action": "toggle-panel" }
+  ],
+  "panels": [
+    { "id": "main", "page": "index.html", "title": "即意", "width": 360, "height": 540 }
+  ]
+}

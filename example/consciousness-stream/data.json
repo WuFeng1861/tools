@@ -1,0 +1,204 @@
+{
+  "sessions": [
+    {
+      "id": "mp9wdv1ssvwfls6kbcg",
+      "title": "我想要",
+      "items": [
+        {
+          "id": "mp9wgv8mipvlpuaa79",
+          "content": "可乐鸡翅",
+          "createdAt": 1779029898790
+        },
+        {
+          "id": "mp9wgvn0v31f0itv52h",
+          "content": "红烧排骨",
+          "createdAt": 1779029899308
+        },
+        {
+          "id": "mp9wgvtyaw58w3rfkb5",
+          "content": "尖椒酿肉",
+          "createdAt": 1779029899558
+        },
+        {
+          "id": "mp9wgw924j22l8xirk",
+          "content": "买一辆电动车",
+          "createdAt": 1779029900102
+        }
+      ],
+      "completedItems": [
+        {
+          "id": "mp9wgvdas9b39irjwao",
+          "content": "口水鸡",
+          "createdAt": 1779029898958
+        },
+        {
+          "id": "mpkmymv9j4ufus7wzh",
+          "content": "剪头",
+          "createdAt": 1779679059525
+        },
+        {
+          "id": "mp9wgw2ulnrj4ggzivk",
+          "content": "出去游玩一趟",
+          "createdAt": 1779029899878
+        },
+        {
+          "id": "mp9wguydc9bc01y59o",
+          "content": "做一顿饭",
+          "createdAt": 1779029898421
+        },
+        {
+          "id": "mp9wgvibmlakob5995",
+          "content": "番茄炒蛋",
+          "createdAt": 1779029899139
+        }
+      ],
+      "createdAt": 1779029758576
+    },
+    {
+      "id": "mtnbwqkptyh3wpfuf4l",
+      "title": "我的量化",
+      "items": [
+        {
+          "id": "mtnqhf1zff90sypzsd6",
+          "content": "自动化搜寻特征、标签、ic打分",
+          "createdAt": 1788573502583
+        },
+        {
+          "id": "mttn7brmzqh8vnwktoj",
+          "content": "标签只有-1，0，1这种打分法吗？丰富一下",
+          "createdAt": 1788930789970
+        },
+        {
+          "id": "mul92i9y73ikwmidhts",
+          "content": "测试回测2.0是否正确，能否使用正常流程复现",
+          "createdAt": 1790600103430
+        },
+        {
+          "id": "mul9345xkxh9z0uds5p",
+          "content": "实盘2.0是否真的能用，需要测试",
+          "createdAt": 1790600131797
+        }
+      ],
+      "completedItems": [
+        {
+          "id": "mtnqh1kd9m18ce2j44r",
+          "content": "自动化执行加密货币量化的训练与回测",
+          "createdAt": 1788573485101
+        },
+        {
+          "id": "mu6jv8f9mmtq4sfx8d",
+          "content": "2026-09-16-reco-lowturn这个的最优总收益率有449.67%，但是为什么年华只有57.15%，是回测的时间不对吗？按道理来说只有不到4年的回测时间啊，所以这个收益率是回测了训练的时间吗？",
+          "createdAt": 1789711247205
+        },
+        {
+          "id": "mucfx6ep5fl9ej75ix",
+          "content": "常驻调参任务为什么结果显示不对，2026-09-16-reco-lowturn 运行中 BTCUSDT · um trial 12 轮（成功 12） 最优 80.25%（总收益率）但是里面的展示的任务都没有80.25%收益啊",
+          "createdAt": 1790067416497
+        },
+        {
+          "id": "muminbnav1vdvm4wgya",
+          "content": "实盘执行中的线上示框没有持仓的成交时间",
+          "createdAt": 1790676657334
+        },
+        {
+          "id": "mumiodbnxo2j1gv1w1j",
+          "content": "实盘执行是否有每笔交易持仓的到期时间",
+          "createdAt": 1790676706163
+        }
+      ],
+      "createdAt": 1788549023113
+    },
+    {
+      "id": "mtq55mdl4w04xkrdgpk",
+      "title": "新量化相关",
+      "items": [
+        {
+          "id": "mtq57fdjy346btyx1oo",
+          "content": "https://github.com/Theclues/TradeGenuis-box  量化方案",
+          "createdAt": 1788719163032
+        }
+      ],
+      "completedItems": [],
+      "createdAt": 1788719078793
+    },
+    {
+      "id": "mtqan1mibqvovh8pn67",
+      "title": "预测项目",
+      "items": [
+        {
+          "id": "mtqanbkngiruqrxms9b",
+          "content": "polymarket 做一个中间商",
+          "createdAt": 1788728302679
+        }
+      ],
+      "completedItems": [],
+      "createdAt": 1788728289786
+    },
+    {
+      "id": "mu2nfdfjbyvqzvu3m6r",
+      "title": "股票",
+      "items": [
+        {
+          "id": "mu2nfugc3bj3890jjyp",
+          "content": "长江电力可以在股票的顶峰2年后购买",
+          "createdAt": 1789475383020
+        },
+        {
+          "id": "mu2nm3haqk1myilpdw",
+          "content": "招商公路在顶峰时期可以买，但是这玩意在进入新的顶峰的时候就需要卖了，所以是一个择时的股票",
+          "createdAt": 1789475674654
+        },
+        {
+          "id": "mu2nq491giedhda4w4p",
+          "content": "宁沪高速稳定上涨，但是好像是在顶峰后1-2年可以买入，有点奇怪",
+          "createdAt": 1789475862277
+        },
+        {
+          "id": "mu2ntdacm5oblirds3",
+          "content": "粤高速A在股票顶峰时候可以买入，并且股息支付率和分红很不错",
+          "createdAt": 1789476013956
+        },
+        {
+          "id": "mu2nxerf4vwtlum753r",
+          "content": "中国中铁好像是波动性的股票但是我看不懂怎么波动的，但是我看到买点是股票顶峰时间",
+          "createdAt": 1789476202491
+        },
+        {
+          "id": "mu2obychkyhbb6yh5z",
+          "content": "中国神华，好像是稳赚的？并且比较推荐股票巅峰时期购买，并且股息支付率和分红相当不错",
+          "createdAt": 1789476881057
+        },
+        {
+          "id": "mu2oeeqhuzpby9rsxmh",
+          "content": "陕西煤业和中国神华类似感觉一样的",
+          "createdAt": 1789476995609
+        }
+      ],
+      "completedItems": [],
+      "createdAt": 1789475360959
+    },
+    {
+      "id": "mu6k53rpmdh49rv3dl",
+      "title": "bug",
+      "items": [],
+      "completedItems": [
+        {
+          "id": "mu6k7k2tcp52bll5rtq",
+          "content": "小工具平台的剪贴板在弹窗时点击清空，弹窗太大了，被挡住了不能点击取消只能点击确定，并且重新隐藏和展示这个剪贴板历史也还是弹窗存在并且被挡住",
+          "createdAt": 1789711822181
+        }
+      ],
+      "createdAt": 1789711707733
+    }
+  ],
+  "activeSessionId": "mtnbwqkptyh3wpfuf4l",
+  "themeColor": "#6b47e1",
+  "rainbowMode": false,
+  "flowMode": true,
+  "windowWidth": 320,
+  "windowHeight": 500,
+  "savedColors": [
+    "#6b47e1"
+  ],
+  "themeMode": "light"
+}

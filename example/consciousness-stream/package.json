@@ -1,0 +1,7 @@
+{
+  "name": "consciousness-stream-tool",
+  "version": "0.1.0",
+  "private": true,
+  "description": "即意（意识流清单）平台工具 — 零依赖",
+  "main": "app.js"
+}

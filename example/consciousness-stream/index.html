@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>即意</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 标题栏（面板可拖拽区域）：deep 表示整条标题栏任意处都能拖动，按钮等可点击元素自动豁免 -->
+    <div class="title-bar" data-tauri-drag-region="deep">
+      <div class="title-left">
+        <button class="lists-btn" id="listsBtn" title="全部清单">☰</button>
+        <span class="title-text">即意</span>
+      </div>
+      <div class="window-controls">
+        <button class="control-btn" id="minBtn" title="隐藏">─</button>
+        <button class="control-btn close-btn" id="closeBtn" title="隐藏 (Esc)">×</button>
+      </div>
+    </div>
+
+    <!-- 输入区 -->
+    <div class="input-area">
+      <input id="streamInput" class="stream-input" placeholder="此刻脑子里冒出了什么..." autocomplete="off" />
+    </div>
+
+    <!-- 进度 -->
+    <div class="progress-indicator">
+      <div class="progress-text">
+        <span class="progress-count" id="progressText">0 / 20</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <!-- 意识流列表 -->
+    <div class="stream-list" id="streamList"></div>
+
+    <!-- 已完成 -->
+    <div id="completedContainer"></div>
+
+    <!-- 底部栏 -->
+    <div class="bottom-bar">
+      <div class="theme-trigger" id="themeTrigger" title="主题">
+        <span class="theme-dot" id="themeDot"></span>
+      </div>
+      <button class="new-session-btn" id="newSessionBtn">新建清单</button>
+      <button class="legacy-btn" id="legacyBtn" title="旧数据迁移">旧数据迁移</button>
+    </div>
+
+    <!-- 监听地址（平台随机分配的端口，便于排查） -->
+    <div class="port-info" id="portInfo" title="本工具监听地址（平台随机分配）"></div>
+
+    <!-- 全部清单遮罩层 -->
+    <div class="all-lists-overlay" id="overlayContainer"></div>
+
+    <!-- 主题弹层 -->
+    <div class="theme-popup" id="themePopup"></div>
+
+    <!-- 弹窗（确认 / 旧数据迁移） -->
+    <div class="modal-layer" id="dialogContainer"></div>
+  </div>
+
+  <script src="/app-ui.js"></script>
+</body>
+</html>
