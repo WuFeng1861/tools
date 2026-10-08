@@ -22,13 +22,24 @@
         <div class="history-head">
           <h2 class="history-title">历史记录</h2>
           <div class="history-actions">
+            <button
+              type="button"
+              id="btn-copy-selected"
+              class="btn-ghost copy"
+              title="复制当前选中记录的连接信息（IP、端口、用户名、密码 / 私钥）"
+            >
+              复制选中
+            </button>
             <button type="button" id="btn-save-history" class="btn-ghost" title="把当前表单保存为一条历史记录">保存当前</button>
             <button type="button" id="btn-clear-history" class="btn-ghost danger" title="清空全部历史记录">清空</button>
           </div>
         </div>
         <div id="history-empty" class="history-empty">还没有历史记录。测试后点「保存当前」，下次点条目即可一键填充所有数据。</div>
         <ul id="history-list" class="history-list"></ul>
-        <p class="history-note">点击条目自动填充表单；「更新」用当前表单覆盖该条；记录保存在工具目录 history.json（含密码，注意本机安全）。</p>
+        <p class="history-note">
+          点击条目自动填充表单并选中；「复制」把该条连接信息（IP、端口、用户名、密码 / 私钥）写入剪贴板；
+          「更新」用当前表单覆盖该条。记录保存在工具目录 history.json（含密码，注意本机安全）。
+        </p>
       </section>
 
       <section class="card">

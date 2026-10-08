@@ -486,6 +486,17 @@ input[readonly] {
   box-shadow: 0 1px 4px rgba(22, 163, 74, 0.12);
 }
 
+/* 选中态：供「复制选中」使用 */
+.history-item.selected {
+  border-color: var(--primary);
+  background: var(--success-bg);
+  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.16);
+}
+
+.history-item.selected .history-user {
+  color: var(--primary-dark);
+}
+
 .history-main {
   flex: 1;
   min-width: 0;
@@ -557,6 +568,30 @@ input[readonly] {
   background: var(--danger-bg);
   color: var(--danger);
   border-color: #fecaca;
+}
+
+/* 「复制」小按钮 */
+.btn-mini.copy {
+  color: var(--primary-dark);
+  background: var(--success-bg);
+  border-color: #bbf7d0;
+}
+
+.btn-mini.copy:hover {
+  background: #dcfce7;
+  color: var(--primary-dark);
+  border-color: #86efac;
+}
+
+/* 工具栏里的「复制选中」 */
+.btn-ghost.copy {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.btn-ghost.copy:hover {
+  background: #dbeafe;
 }
 
 .history-note {

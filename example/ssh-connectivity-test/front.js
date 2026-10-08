@@ -191,9 +191,11 @@ function setLoading(loading) {
 // =====================================================================
 
 let historyRecords = [];
+let selectedHistoryId = null; // 当前选中的历史记录 id（用于「复制选中」）
 
 const btnSaveHistory = document.getElementById("btn-save-history");
 const btnClearHistory = document.getElementById("btn-clear-history");
+const btnCopySelected = document.getElementById("btn-copy-selected");
 const historyList = document.getElementById("history-list");
 const historyEmpty = document.getElementById("history-empty");
 const toast = document.getElementById("toast");
@@ -209,6 +211,70 @@ function flashToast(msg, isError = false) {
   toast.className = "toast" + (isError ? " error" : "");
   clearTimeout(toast._t);
   toast._t = setTimeout(() => toast.classList.add("hidden"), 1800);
+}
+
+// =====================================================================
+// 复制连接信息到剪贴板：主机(IP)、端口、用户名、密码 / 私钥
+// =====================================================================
+
+/** 把一条连接信息格式化成可粘贴的多行文本 */
+function buildConnText(rec) {
+  const lines = [
+    `主机: ${rec.host || ""}`,
+    `端口: ${rec.port || 22}`,
+    `用户名: ${rec.username || ""}`,
+  ];
+  if (rec.authMethod === "key") {
+    lines.push(`私钥: ${rec.keyPath || ""}`);
+    if (rec.keyPassphrase) lines.push(`私钥口令: ${rec.keyPassphrase}`);
+  } else {
+    lines.push(`密码: ${rec.password || ""}`);
+  }
+  return lines.join("\n");
+}
+
+/** 写入剪贴板：优先 navigator.clipboard，不可用时回退到 execCommand */
+async function copyText(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 回退到 execCommand */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 复制一条记录并提示结果 */
+async function copyRecord(rec) {
+  const ok = await copyText(buildConnText(rec));
+  const who = `${rec.username}@${rec.host}:${rec.port}`;
+  flashToast(ok ? `已复制 ${who} 的连接信息` : "复制失败，请手动选择文本复制", !ok);
+  return ok;
+}
+
+/** 选中某条历史记录（高亮），供「复制选中」使用 */
+function selectHistory(id) {
+  selectedHistoryId = id;
+  for (const li of historyList.children) {
+    li.classList.toggle("selected", li.dataset.id === id);
+  }
 }
 
 /** 收集当前表单为一条记录（主机/用户名为空时返回 null） */
@@ -246,6 +312,7 @@ function fillForm(rec) {
   document.getElementById("timeout").value = rec.timeoutSecs || 10;
   document.getElementById("host").focus();
   document.getElementById("host").select();
+  selectHistory(rec.id);
   flashToast(`已填充：${rec.username}@${rec.host}:${rec.port}`);
 }
 
@@ -266,15 +333,21 @@ function renderHistory() {
   historyList.innerHTML = "";
   historyEmpty.style.display = historyRecords.length ? "none" : "";
 
+  // 选中的记录可能已被删除 / 清空
+  if (selectedHistoryId && !historyRecords.some((r) => r.id === selectedHistoryId)) {
+    selectedHistoryId = null;
+  }
+
   for (const rec of historyRecords) {
     const li = document.createElement("li");
     li.className = "history-item";
     li.dataset.id = rec.id;
+    if (rec.id === selectedHistoryId) li.classList.add("selected");
 
-    // 主体：点击填充
+    // 主体：点击填充并选中
     const main = document.createElement("div");
     main.className = "history-main";
-    main.title = "点击填充到表单";
+    main.title = "点击填充到表单并选中";
     main.addEventListener("click", () => fillForm(rec));
 
     const user = document.createElement("span");
@@ -291,9 +364,18 @@ function renderHistory() {
     time.textContent = formatTime(rec.savedAt);
     main.append(user, port, method, time);
 
-    // 操作：更新 / 删除
+    // 操作：复制 / 更新 / 删除
     const ops = document.createElement("div");
     ops.className = "history-ops";
+    const btnCopy = document.createElement("button");
+    btnCopy.type = "button";
+    btnCopy.className = "btn-mini copy";
+    btnCopy.textContent = "复制";
+    btnCopy.title = "复制该连接信息（IP、端口、用户名、密码 / 私钥）到剪贴板";
+    btnCopy.addEventListener("click", () => {
+      selectHistory(rec.id);
+      copyRecord(rec);
+    });
     const btnUpd = document.createElement("button");
     btnUpd.type = "button";
     btnUpd.className = "btn-mini";
@@ -306,7 +388,7 @@ function renderHistory() {
     btnDel.textContent = "删除";
     btnDel.title = "删除这条记录";
     btnDel.addEventListener("click", () => deleteHistory(rec.id));
-    ops.append(btnUpd, btnDel);
+    ops.append(btnCopy, btnUpd, btnDel);
 
     li.append(main, ops);
     historyList.appendChild(li);
@@ -382,6 +464,16 @@ async function clearHistory() {
 
 btnSaveHistory.addEventListener("click", saveHistory);
 btnClearHistory.addEventListener("click", clearHistory);
+
+// 复制当前选中记录的连接信息；没有选中时退而复制当前表单内容
+btnCopySelected.addEventListener("click", async () => {
+  const rec = historyRecords.find((r) => r.id === selectedHistoryId);
+  if (rec) return copyRecord(rec);
+
+  const current = collectForm();
+  if (!current) return flashToast("请先点击一条历史记录选中（或填写表单）", true);
+  await copyRecord(current);
+});
 
 // 页面加载时读取历史
 loadHistory();
