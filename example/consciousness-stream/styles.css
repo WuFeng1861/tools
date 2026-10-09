@@ -565,6 +565,33 @@ body {
   color: #fff;
 }
 
+/* 已完成 → 返回未完成 */
+.completed-restore {
+  opacity: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.completed-item:hover .completed-restore {
+  opacity: 1;
+}
+
+.completed-restore:hover {
+  background: var(--theme-alpha-25);
+  color: var(--theme-color-light);
+}
+
 /* ============================================================
    底部栏
    ============================================================ */

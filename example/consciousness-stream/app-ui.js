@@ -364,6 +364,7 @@
         '<div class="completed-item" data-id="' + esc(it.id) + '">' +
           '<span class="completed-check">✓</span>' +
           '<span class="completed-content">' + esc(it.content) + "</span>" +
+          '<button class="completed-restore" data-id="' + esc(it.id) + '" title="返回未完成">↩</button>' +
           '<button class="completed-delete" data-id="' + esc(it.id) + '" title="删除">×</button>' +
         "</div>";
     }
@@ -464,6 +465,18 @@
         state.items = res.data.items || state.items;
         state.completedItems = res.data.completedItems || state.completedItems;
         render();
+      }
+    }).catch(function () {});
+  }
+
+  // 已完成 → 返回未完成（移回当前清单末尾）
+  function restoreCompleted(id) {
+    api("/api/completed/restore", { id: id }).then(function (res) {
+      if (res.ok) {
+        state.items = res.data.items || state.items;
+        state.completedItems = res.data.completedItems || state.completedItems;
+        render();
+        scrollToBottom();
       }
     }).catch(function () {});
   }
@@ -896,7 +909,11 @@
       var cBtn = e.target.closest(".item-complete");
       if (cBtn) { completeItem(cBtn.getAttribute("data-id")); return; }
       var dBtn = e.target.closest(".item-delete");
-      if (dBtn) { deleteItem(dBtn.getAttribute("data-id")); return; }
+      if (dBtn) {
+        var delId = dBtn.getAttribute("data-id");
+        showConfirm("删除这条内容？", function () { deleteItem(delId); });
+        return;
+      }
     });
 
     streamListEl.addEventListener("mousedown", function (e) {
@@ -914,8 +931,13 @@
         renderCompleted();
         return;
       }
+      var rBtn = e.target.closest(".completed-restore");
+      if (rBtn) { restoreCompleted(rBtn.getAttribute("data-id")); return; }
       var d = e.target.closest(".completed-delete");
-      if (d) { deleteCompleted(d.getAttribute("data-id")); }
+      if (d) {
+        var cid = d.getAttribute("data-id");
+        showConfirm("删除这条已完成内容？", function () { deleteCompleted(cid); });
+      }
     });
 
     // 主题

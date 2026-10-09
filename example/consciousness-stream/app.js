@@ -506,6 +506,19 @@ server.route("/api/completed/delete", (req, res, body) => {
   ok(res, { items: session.items, completedItems: session.completedItems });
 });
 
+// 取消完成（completedItems → items，追加到末尾）
+server.route("/api/completed/restore", (req, res, body) => {
+  const { id } = parseBody(body);
+  const session = ensureActiveSession();
+  const idx = session.completedItems.findIndex((it) => it.id === id);
+  if (idx < 0) return fail(res, "条目不存在", 404);
+  const [item] = session.completedItems.splice(idx, 1);
+  session.items.push(item);
+  save();
+  broadcast();
+  ok(res, { items: session.items, completedItems: session.completedItems });
+});
+
 // 主题：读取
 server.route("/api/theme", (req, res, body) => {
   if (req.method === "POST") {
