@@ -120,8 +120,24 @@
   .fdl{
     color:inherit;text-decoration:none;font-size:12px;opacity:.8;
     border:1px solid currentColor;border-radius:6px;padding:3px 9px;white-space:nowrap;cursor:pointer;
+    background:transparent;
   }
   .fdl:hover{opacity:1}
+  .fdl:disabled{opacity:.45;cursor:default}
+  .fdl.saving{cursor:progress}
+  .fdl.ok{color:var(--ok);border-color:rgba(62,207,142,.6);opacity:1}
+  .row.mine .fdl.ok{color:#c9ffe6;border-color:rgba(255,255,255,.65)}
+  /* 保存/下载状态行 */
+  .dlstat{margin-top:9px}
+  .dlstat .dlrow{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+  .row.mine .dlstat .dlrow{color:rgba(255,255,255,.82)}
+  .dlstat .dlbar{flex:1;height:3px;background:rgba(127,127,127,.25);border-radius:2px;overflow:hidden}
+  .dlstat .dlbar i{display:block;height:100%;width:0;background:var(--ok);transition:width .15s}
+  .row.mine .dlstat .dlbar{background:rgba(255,255,255,.3)}
+  .row.mine .dlstat .dlbar i{background:#fff}
+  .dlstat.indet .dlbar i{width:35%;transition:none;animation:indet 1.05s ease-in-out infinite}
+  @keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+  .dltxt{white-space:nowrap;flex:0 0 auto}
   .gone-tag{
     font-size:11px;color:var(--warn);border:1px solid rgba(240,180,41,.35);
     border-radius:6px;padding:3px 8px;white-space:nowrap;
@@ -130,6 +146,10 @@
   .prog{height:3px;background:rgba(127,127,127,.25);border-radius:2px;overflow:hidden;margin-top:8px}
   .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .15s}
   .row.mine .prog i{background:#fff}
+  .prog.done i{background:var(--ok)}
+  .row.mine .prog.done i{background:#fff}
+  .prog.failed i{background:var(--err)}
+  .row.mine .prog.failed i{background:#ffc9d2}
   .sys{align-self:center;font-size:12px;color:var(--dim);padding:2px 0;text-align:center;line-height:1.7}
   .empty{margin:auto;text-align:center;color:var(--dim);line-height:2;font-size:13px}
   .empty b{color:var(--muted);font-weight:500}
@@ -270,6 +290,26 @@
   .seg button.sel{background:rgba(79,140,255,.14);border-color:var(--accent);color:var(--accent)}
   .note{font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:16px;border-top:1px solid var(--border);padding-top:13px}
   .note b{color:var(--muted);font-weight:500}
+  /* 传输卡片：接收文件时的进度与完成提示 */
+  .xfer{
+    position:fixed;right:18px;bottom:18px;z-index:320;
+    display:flex;flex-direction:column;gap:8px;width:300px;pointer-events:none;
+  }
+  .xcard{
+    background:var(--panel2);border:1px solid var(--border);border-radius:11px;
+    padding:10px 12px;font-size:12.5px;box-shadow:0 10px 26px rgba(0,0,0,.42);
+    animation:in .18s ease-out;
+  }
+  .xcard .xname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:7px}
+  .xcard .xmeta{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)}
+  .xcard .xbar{flex:1;height:3px;background:rgba(127,127,127,.25);border-radius:2px;overflow:hidden}
+  .xcard .xbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+  .xcard .xstat{white-space:nowrap;flex:0 0 auto}
+  .xcard .xstat.ok{color:var(--ok)}
+  .xcard .xstat.bad{color:var(--err)}
+  .xcard.done .xbar{display:none}
+  .xcard.wait .xbar i{width:35%;transition:none;animation:indet 1.05s ease-in-out infinite}
+
   .toast{
     position:fixed;left:50%;bottom:30px;transform:translateX(-50%);
     background:#232833;border:1px solid var(--border);color:var(--text);
@@ -445,6 +485,7 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<div class="xfer" id="xfer"></div>
 <div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
 
 <script type="module">
@@ -516,6 +557,38 @@ function fmtSize(n){
   if(n < 1048576) return (n/1024).toFixed(1) + ' KB';
   if(n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
   return (n/1073741824).toFixed(2) + ' GB';
+}
+
+/** Trystero 的进度回调给的是 0~1 的小数，统一转成 0~100 */
+function toPct(v){
+  const n = typeof v === 'number' ? v : parseFloat(v);
+  if(!isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
+}
+
+/**
+ * 取出消息里携带的业务元信息。
+ *
+ * ⚠ Trystero 会把「发送方传入的 metadata」再包一层：
+ *     发送  act.send(data, { metadata: { name:'a.pdf', kind:'image' } })
+ *     接收  onMessage(data, { peerId, metadata: { name:'a.pdf', kind:'image' } })
+ *   直接读 meta.name 会拿到 undefined（文件名因此退化成 "file"、图片也认不出来）。
+ *   这里统一摊平，并兼容「已经平铺」的写法。
+ */
+function readMeta(meta){
+  const m = (meta && typeof meta === 'object') ? meta : {};
+  const inner = (m.metadata && typeof m.metadata === 'object' && !Array.isArray(m.metadata))
+    ? m.metadata : null;
+  return { peerId: m.peerId || '', info: inner ? Object.assign({}, m, inner) : m };
+}
+
+/** 下载文件名净化：去掉路径分隔符与控制字符，避免落到意料之外的路径 */
+function safeFileName(name, fallback){
+  const s = String(name == null ? '' : name)
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+    .replace(/^\.+/, '')
+    .trim();
+  return (s || fallback || 'file').slice(0, 180);
 }
 function fmtTime(ts){ return new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); }
 function fmtFull(ts){
@@ -835,13 +908,60 @@ function renderMessage(rec, silent){
       const ic = document.createElement('div'); ic.className = 'ficon';
       ic.innerHTML = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
       const fm = document.createElement('div'); fm.className = 'fmeta';
-      fm.innerHTML = '<div class="fname">' + esc(rec.fileName || '文件') + '</div><div class="fsize">' + fmtSize(rec.fileSize) + '</div>';
-      const dl = document.createElement('a');
-      dl.className = 'fdl'; dl.textContent = '下载';
-      dl.href = blobUrl(rec);
-      dl.download = rec.fileName || 'file';
+      const fname = document.createElement('div'); fname.className = 'fname';
+      fname.textContent = rec.fileName || '文件';
+      fname.title = rec.fileName || '文件';
+      const fsize = document.createElement('div'); fsize.className = 'fsize';
+      fsize.textContent = fmtSize(rec.fileSize);
+      fm.append(fname, fsize);
+
+      const dl = document.createElement('button');
+      dl.className = 'fdl'; dl.type = 'button'; dl.textContent = '下载';
+      dl.title = '保存到本机';
+
+      // 保存状态行（进度条 + 文字），默认隐藏
+      const stat = document.createElement('div');
+      stat.className = 'dlstat'; stat.hidden = true;
+      const bar = document.createElement('div'); bar.className = 'dlbar';
+      const fill = document.createElement('i'); bar.appendChild(fill);
+      const txt = document.createElement('span'); txt.className = 'dltxt';
+      const drow = document.createElement('div'); drow.className = 'dlrow';
+      drow.append(bar, txt);
+      stat.appendChild(drow);
+
+      let resetTimer = null;
+      const ui = {
+        saving(p, text){
+          clearTimeout(resetTimer);
+          dl.classList.add('saving'); dl.classList.remove('ok');
+          dl.textContent = '保存中…';
+          stat.hidden = false;
+          if(p == null) stat.classList.add('indet');           // 无法获知真实进度
+          else { stat.classList.remove('indet'); fill.style.width = p.toFixed(0) + '%'; }
+          txt.textContent = text || '';
+        },
+        saved(text){
+          clearTimeout(resetTimer);
+          stat.hidden = false; stat.classList.remove('indet');
+          fill.style.width = '100%';
+          dl.classList.remove('saving'); dl.classList.add('ok');
+          dl.textContent = '✓ 已保存';
+          txt.textContent = text || '保存完成';
+          resetTimer = setTimeout(()=>{
+            dl.textContent = '下载'; dl.classList.remove('ok');
+            stat.hidden = true; fill.style.width = '0'; txt.textContent = '';
+          }, 6000);
+        },
+        reset(){
+          clearTimeout(resetTimer);
+          stat.hidden = true; stat.classList.remove('indet'); fill.style.width = '0';
+          dl.classList.remove('saving','ok'); dl.textContent = '下载'; txt.textContent = '';
+        }
+      };
+      dl.onclick = () => saveFile(rec, ui, fsize, dl);
+
       fr.append(ic, fm, dl);
-      bubble.appendChild(fr);
+      bubble.append(fr, stat);
     }
   } else {
     bubble.textContent = rec.text || '';
@@ -882,6 +1002,125 @@ function expiredCard(rec, isImg){
   const tag = document.createElement('span'); tag.className = 'gone-tag'; tag.textContent = '已过期清理';
   fr.append(ic, fm, tag);
   return fr;
+}
+
+/* ============================================================
+   右下角传输卡片：接收文件时的进度 / 完成 / 失败提示
+   ============================================================ */
+const xfer = {
+  add(title){
+    const el = document.createElement('div');
+    el.className = 'xcard';
+    const n = document.createElement('div'); n.className = 'xname';
+    n.textContent = title; n.title = title;
+    const meta = document.createElement('div'); meta.className = 'xmeta';
+    const bar = document.createElement('span'); bar.className = 'xbar';
+    const fill = document.createElement('i'); bar.appendChild(fill);
+    const stat = document.createElement('span'); stat.className = 'xstat';
+    meta.append(bar, stat);
+    el.append(n, meta);
+    $('xfer').appendChild(el);
+
+    let hideTimer = null;
+    const api = {
+      lastPct: -1,
+      setName(t){ n.textContent = t; n.title = t; },
+      waiting(text){ stat.textContent = text || '处理中…'; },
+      setPct(p, text){
+        el.classList.remove('wait');
+        fill.style.width = Math.max(0, Math.min(100, p || 0)).toFixed(0) + '%';
+        if(text != null) stat.textContent = text;
+      },
+      done(text){
+        el.classList.add('done');
+        stat.className = 'xstat ok'; stat.textContent = '✓ ' + (text || '完成');
+        clearTimeout(hideTimer); hideTimer = setTimeout(()=>el.remove(), 4500);
+      },
+      fail(text){
+        el.classList.add('done');
+        stat.className = 'xstat bad'; stat.textContent = '✗ ' + (text || '失败');
+        clearTimeout(hideTimer); hideTimer = setTimeout(()=>el.remove(), 7000);
+      },
+      close(){ clearTimeout(hideTimer); el.remove(); }
+    };
+    return api;
+  }
+};
+
+/* ============================================================
+   保存文件到本机
+   优先用「另存为」对话框（能选位置、有真实写入进度）；
+   环境不支持时回退到浏览器下载目录，并给出明确提示。
+   ============================================================ */
+const savingIds = new Set();       // 正在保存的消息，避免重复点击
+const recvCards = new Map();       // recvKey -> 接收进度卡片
+
+function recvKey(info){
+  return String(info && info.name || 'file') + '|' + String(info && info.size || 0);
+}
+
+async function saveFile(rec, ui, fsizeEl, btn){
+  const displayName = rec.fileName || '文件';
+  if(!rec.blob){ toast('「' + displayName + '」的文件内容已不在本机（可能已过期清理）'); return; }
+  if(savingIds.has(rec.id)){ toast('「' + displayName + '」正在保存中，请稍候…'); return; }
+
+  savingIds.add(rec.id);
+  const name = safeFileName(rec.fileName);
+  const total = rec.blob.size || 0;
+
+  try{
+    // ---- 路径 1：支持「另存为」→ 让用户决定位置，并给出真实写入进度 ----
+    if(typeof window.showSaveFilePicker === 'function'){
+      let handle = null;
+      try{
+        handle = await window.showSaveFilePicker({ suggestedName: name });
+      }catch(e){
+        if(e && e.name === 'AbortError'){ toast('已取消保存「' + displayName + '」'); return; }
+        handle = null;   // 无权限 / 沙盒限制 / 环境不支持 → 自动回退
+      }
+      if(handle){
+        const savedName = handle.name || name;
+        ui.saving(0, '0%');
+        const w = await handle.createWritable();
+        try{
+          const CH = 1024 * 1024;
+          for(let off = 0; off < total; off += CH){
+            await w.write(rec.blob.slice(off, Math.min(off + CH, total)));
+            const done = Math.min(off + CH, total);
+            const p = total ? done / total * 100 : 100;
+            ui.saving(p, Math.round(p) + '%');
+          }
+          await w.close();
+        }catch(err){
+          try{ await w.abort(); }catch(_){}
+          throw err;
+        }
+        ui.saved('已保存到所选位置');
+        if(fsizeEl) fsizeEl.textContent = fmtSize(total) + ' · 已保存';
+        toast('已保存「' + savedName + '」（' + fmtSize(total) + '）');
+        return;
+      }
+    }
+
+    // ---- 路径 2：回退到浏览器下载目录（无法获知进度，用不确定态 + 完成提示）----
+    ui.saving(null, '保存中…');
+    const url = blobUrl(rec);
+    if(!url) throw new Error('无法生成下载数据');
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ try{ a.remove(); }catch(_){} }, 0);
+    ui.saved('已保存到下载目录');
+    if(fsizeEl) fsizeEl.textContent = fmtSize(total) + ' · 已保存';
+    toast('已保存「' + name + '」（' + fmtSize(total) + '）到浏览器下载目录');
+  }catch(e){
+    console.warn('保存失败', e);
+    ui.reset();
+    toast('保存「' + displayName + '」失败：' + ((e && e.message) || e));
+  }finally{
+    savingIds.delete(rec.id);
+  }
 }
 
 function renderMembers(){
@@ -967,7 +1206,7 @@ async function join(){
   state.actions = A;
 
   A.hello.onMessage = (data, m) => {
-    const peerId = (m && m.peerId) || '';
+    const peerId = readMeta(m).peerId;
     const isNew = !state.peers.has(peerId);
     state.peers.set(peerId, { name: (data && data.name) || peerId.slice(0,6) });
     renderMembers();
@@ -975,7 +1214,7 @@ async function join(){
   };
 
   A.msg.onMessage = (m, meta) => {
-    const peerId = (meta && meta.peerId) || '';
+    const peerId = readMeta(meta).peerId;
     const p = state.peers.get(peerId);
     const rec = {
       id: uid(), roomId: state.roomId, ts: (m && m.ts) || Date.now(),
@@ -987,28 +1226,45 @@ async function join(){
   };
 
   A.file.onMessage = (data, meta) => {
-    const info = meta || {};
-    const peerId = info.peerId || '';
+    // ⚠ metadata 在 meta.metadata 里（见 readMeta 注释），直接读 meta.name 会得到 undefined
+    const { peerId, info } = readMeta(meta);
     const p = state.peers.get(peerId);
-    const blob = new Blob([data], { type: info.mime || 'application/octet-stream' });
     const isImg = info.kind === 'image';
+    const blob = new Blob([data], { type: info.mime || 'application/octet-stream' });
     const now = Date.now();
+    const fileName = info.name || (isImg ? '图片' : '文件');
     const rec = {
       id: uid(), roomId: state.roomId, ts: now, mine: false,
-      kind: isImg ? 'image' : 'file', name: (p && p.name) || '匿名',
-      fileName: info.name || (isImg ? 'image' : 'file'),
-      fileSize: info.size || blob.size,
+      kind: isImg ? 'image' : 'file',
+      name: (p && p.name) || info.from || '匿名',
+      fileName, fileSize: info.size || blob.size,
       mime: info.mime || '', blob, expireAt: now + FILE_TTL
     };
     saveMessage(rec);
     renderMessage(rec);
+
+    // 收完把对应的进度卡片收掉 / 给出一次明确提示
+    const key = recvKey(info);
+    const card = recvCards.get(key);
+    if(card){ card.done('已接收'); recvCards.delete(key); }
+    else toast('已收到' + (isImg ? '图片' : '文件') + '「' + fileName + '」（' + fmtSize(rec.fileSize) + '）');
   };
 
-  // 接收大文件时显示进度
-  A.file.onReceiveProgress = (pct) => {
-    const v = pct <= 1 ? pct * 100 : pct;
-    setHint('正在接收文件… ' + Math.min(100, v).toFixed(0) + '%');
-    if(v >= 99.5) setTimeout(()=>setHint(''), 900);
+  // 接收进度：Trystero 的回调签名是 (进度 0~1, { peerId, metadata })
+  A.file.onReceiveProgress = (pct, meta) => {
+    const { info } = readMeta(meta);
+    const key = recvKey(info);
+    const v = toPct(pct);
+    let card = recvCards.get(key);
+    if(!card){
+      if(v >= 99.5) return;                 // 小文件瞬时到达，不必弹卡片
+      card = xfer.add(info.name || '正在接收文件');
+      recvCards.set(key, card);
+    }
+    const r = Math.round(v);
+    if(r === card.lastPct) return;          // 每 16KB 回调一次，必须节流
+    card.lastPct = r;
+    card.setPct(v, r + '%');
   };
 
   bindHandler(room, 'onPeerJoin', peerId => { A.hello.send({ name: state.name }); });
@@ -1073,7 +1329,10 @@ async function sendFiles(files){
   for(const f of files){
     if(f.size > MAX_FILE){ toast('「' + f.name + '」超过 100MB，已跳过'); continue; }
     const isImg = /^image\//.test(f.type);
-    const meta = { name: f.name, mime: f.type || 'application/octet-stream', size: f.size, kind: isImg ? 'image' : 'file' };
+    const meta = {
+      name: f.name, mime: f.type || 'application/octet-stream',
+      size: f.size, kind: isImg ? 'image' : 'file', from: state.name
+    };
     const now = Date.now();
     const rec = {
       id: uid(), roomId: state.roomId, ts: now, mine: true,
@@ -1084,28 +1343,42 @@ async function sendFiles(files){
     const row = renderMessage(rec);
     saveMessage(rec);   // 先落盘，保证即使传输失败本地也有记录
 
+    const bubble = row.querySelector('.bubble');
+    const fsize = row.querySelector('.fsize');
     const prog = document.createElement('div');
     prog.className = 'prog';
     prog.innerHTML = '<i style="width:0%"></i>';
     const bar = prog.firstChild;
-    const bubble = row.querySelector('.bubble');
     if(bubble) bubble.appendChild(prog);
 
-    try{
-      const buf = await f.arrayBuffer();
-      const p = state.actions.file.send(buf, {
-        metadata: meta,
-        onProgress: (pct) => {
-          const v = pct <= 1 ? pct * 100 : pct;
-          bar.style.width = Math.min(100, v).toFixed(0) + '%';
-        }
-      });
-      if(p && p.catch) p.catch(e => console.warn('文件发送失败', e));
-    }catch(e){
-      toast('「' + f.name + '」发送失败');
+    // 没人在线时 Trystero 会「无人可发」地直接成功，必须提前说清楚，否则是假成功
+    if(state.peers.size === 0){
+      prog.classList.add('failed');
+      if(fsize) fsize.textContent = fmtSize(f.size) + ' · 未送出（无人在线）';
+      toast('当前没有其他在线成员，「' + f.name + '」未送出');
+      setTimeout(() => { try{ prog.remove(); }catch(e){} }, 4500);
+      continue;
     }
-    bar.style.width = '100%';
-    setTimeout(() => { try{ prog.remove(); }catch(e){} }, 700);   // 传完自动隐去进度条
+
+    try{
+      // 直接把 File/Blob 交给 Trystero：它自己分片读取，无需先读成整个 ArrayBuffer
+      const p = state.actions.file.send(f, {
+        metadata: meta,
+        onProgress: (pct) => { bar.style.width = toPct(pct).toFixed(0) + '%'; }
+      });
+      await p;
+      bar.style.width = '100%';
+      prog.classList.add('done');
+      if(fsize) fsize.textContent = fmtSize(f.size) + ' · 已发送';
+      setTimeout(() => { try{ prog.remove(); }catch(e){} }, 1200);
+    }catch(e){
+      console.warn('文件发送失败', e);
+      bar.style.width = '100%';
+      prog.classList.add('failed');
+      if(fsize) fsize.textContent = fmtSize(f.size) + ' · 发送失败';
+      toast('「' + f.name + '」发送失败' + ((e && e.message) ? '：' + e.message : ''));
+      setTimeout(() => { try{ prog.remove(); }catch(e2){} }, 5000);
+    }
   }
 }
 function autoGrow(){

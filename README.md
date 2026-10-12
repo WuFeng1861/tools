@@ -12,6 +12,7 @@
   手动把含 `index.html` 的目录丢进 `toolbox/` 也会被自动接管
 - 🖥️ **工具独立运行**：每个工具 = 独立 Node 进程 + 固定本机端口 + iframe 界面
 - 💾 **存储可持久**：端口跨重启复用，工具的 localStorage / IndexedDB 不会丢
+- 🖱️ **工具页支持拖拽**：拖文件进工具界面可直接使用（Tauri 原生拖放已关，改由 HTML5 处理）
 - 🧹 **残留自动清理**：换端口/删工具留下的旧存储，等端口空闲时自动占回来清掉，可在设置里查看
 - 📦 **依赖管理**：专门的页面为工具安装 / 卸载 / 列出 npm 包
 - ✏️ **内置编辑器**：应用内新建、编辑工具的 `manifest.json` / `index.html` / `app.js`
@@ -211,12 +212,19 @@ server.start();        // 自动监听 process.env.TOOL_PORT
 
 ```bash
 npm run test:host     # 宿主回归测试（真实进程跑完整流程，无需 Tauri）
+npm run test:p2p      # p2p-chat 浏览器回归测试（真实 Chromium + Trystero 桩模块）
 cd src-tauri && cargo test   # URL 白名单等单元测试
 ```
 
 `test:host` 覆盖「端口 ↔ 存储」不变量、URL 工具识别、本地网页工具、
 端口冲突决策流程、残留数据清理等 —— 这几条断言都实际抓出过 bug，
 改 `host.js` 后请务必跑一遍。
+
+`test:p2p` 覆盖 p2p-chat 的文件名/metadata、下载保存提示与进度、另存为回退、拖拽发送。
+它存在的理由是：**Trystero 会把 `metadata` 再包一层**再交给 `onMessage`
+（接收端拿到的是 `{ peerId, metadata: {...} }`），读错层级会让文件名静默退化成
+`file`、图片被当成普通文件 —— 语法检查和类型检查**都发现不了**，
+只能靠真实浏览器跑一遍。改 `example/p2p-chat/index.html` 后请跑这个。
 
 ## 依赖管理
 
@@ -227,7 +235,7 @@ cd src-tauri && cargo test   # URL 白名单等单元测试
 ```
 Vue3 前端 ──invoke──▶ Rust(Tauri) ──HTTP(127.0.0.1)──▶ Node 宿主(host.js)
                                                           │  spawn 每工具一个 node.exe
-                                     iframe 直接加载 ◀────┘ 监听随机端口
+                                     iframe 直接加载 ◀────┘ 监听固定端口（记在 ports.json）
 ```
 
 - 平台管理界面（启动器 / 编辑器 / 依赖管理）走 Tauri IPC
@@ -235,6 +243,26 @@ Vue3 前端 ──invoke──▶ Rust(Tauri) ──HTTP(127.0.0.1)──▶ Nod
 - 独立进程 + 独立端口 + iframe 三重隔离，一个工具崩溃不影响平台与其他工具
 
 详细设计见 [DESIGN.md](./DESIGN.md)。
+
+### 为什么关掉了 Tauri 的原生拖放
+
+`src-tauri/tauri.conf.json` 里窗口设了 `"dragDropEnabled": false`，**不要改回去**。
+
+Tauri 默认开启原生拖放：它会在窗口 HWND 上注册一个 COM `IDropTarget`
+（wry 的 `with_drag_drop_handler` → `RegisterDragDrop`），于是「把文件拖进窗口」
+在系统层就被截走了，网页里的 `dragenter / dragover / drop` **永远不会触发**。
+Tauri 源码里的原话是：
+
+> Whether the drag and drop is enabled or not on the webview. By default it is enabled.
+> **Disabling it is required to use HTML5 drag and drop on the frontend on Windows.**
+
+平台自己并没有监听 `tauri://drag-drop`，所以关掉它没有副作用，
+反而让所有工具页（包括 iframe 里的）都能用标准 HTML5 拖拽。
+
+注意配套的一点：关掉之后改由 WebView 处理拖放，**如果页面上没人 `preventDefault`，
+把文件丢到窗口上会让 WebView「导航到那个文件」**。所以 `index.html` 里加了
+window 级的 `dragover` / `drop` 兜底（只 `preventDefault`，不 `stopPropagation`，
+不影响卡片排序等文档内拖拽）。工具页在自己的 iframe 里各自处理拖拽。
 
 ## 目录结构
 

@@ -19,6 +19,20 @@
         }
       })();
     </script>
+    <script>
+      // 拖拽兜底。
+      // Tauri 的原生拖放已关闭（src-tauri/tauri.conf.json → dragDropEnabled: false），
+      // 改由 WebView 自己处理拖放。此时如果页面上没有任何处理器，把文件丢到窗口上
+      // 会让 WebView「导航到那个文件」，整个平台界面就被替换掉了。这里统一拦下。
+      // 只 preventDefault、不 stopPropagation：工具卡片排序等内部拖拽不受影响；
+      // 工具页在自己的 iframe 里各自处理拖拽（跨源，事件不会冒泡到这里）。
+      window.addEventListener("dragover", function (e) {
+        e.preventDefault();
+      });
+      window.addEventListener("drop", function (e) {
+        e.preventDefault();
+      });
+    </script>
   </head>
 
   <body>
