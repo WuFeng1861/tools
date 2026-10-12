@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>P2P 无服务器聊天室</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%234f8cff'/><circle cx='11' cy='16' r='3.2' fill='white'/><circle cx='21' cy='11' r='3.2' fill='white'/><circle cx='21' cy='21' r='3.2' fill='white'/><path d='M13.6 14.4L18.6 12M13.6 17.6L18.6 20' stroke='white' stroke-width='1.6'/></svg>">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a20; --panel2:#1d2129; --border:#282d37;
+    --text:#e6e8ec; --muted:#8b93a5; --dim:#5c6474;
+    --accent:#4f8cff; --accent2:#3a6fd8; --ok:#3ecf8e; --warn:#f0b429; --err:#f0536b;
+    --radius:12px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    font-size:14px; overflow:hidden;
+  }
+  button{font-family:inherit;cursor:pointer;border:none;outline:none}
+  input,textarea,select{font-family:inherit;outline:none}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:#333944;border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  mark{background:rgba(240,180,41,.32);color:inherit;border-radius:2px;padding:0 1px}
+
+  .app{height:100vh;display:flex;flex-direction:column}
+
+  /* ---------- header ---------- */
+  .top{
+    display:flex;align-items:center;gap:10px;
+    padding:10px 16px;border-bottom:1px solid var(--border);
+    background:var(--panel);flex:0 0 auto;
+  }
+  .brand{display:flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:0 0 auto}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(62,207,142,.15)}
+  .dot.wait{background:var(--warn);animation:pulse 1.4s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  .spacer{flex:1}
+  .chip{
+    display:flex;align-items:center;gap:6px;background:var(--panel2);
+    border:1px solid var(--border);border-radius:999px;padding:5px 12px;
+    font-size:13px;color:var(--muted);cursor:pointer;transition:.15s;white-space:nowrap;
+  }
+  .chip:hover{border-color:var(--accent);color:var(--text)}
+  .chip b{color:var(--text);font-weight:500;letter-spacing:.5px}
+  .btn{
+    display:inline-flex;align-items:center;gap:6px;justify-content:center;
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);
+    border-radius:8px;padding:7px 12px;font-size:13px;transition:.15s;white-space:nowrap;
+  }
+  .btn:hover{border-color:var(--accent);background:#232833}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn.primary:hover{background:var(--accent2);border-color:var(--accent2)}
+  .btn.ghost{background:transparent}
+  .btn.danger{color:var(--err);border-color:rgba(240,83,107,.35)}
+  .btn.danger:hover{background:rgba(240,83,107,.12);border-color:var(--err)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .online{font-size:13px;color:var(--muted);white-space:nowrap}
+  .online b{color:var(--ok);font-weight:500}
+  .icon-btn{
+    width:34px;height:34px;border-radius:8px;background:transparent;
+    border:1px solid transparent;color:var(--muted);
+    display:flex;align-items:center;justify-content:center;transition:.15s;
+  }
+  .icon-btn:hover{background:var(--panel2);border-color:var(--border);color:var(--text)}
+
+  /* ---------- body ---------- */
+  .body{flex:1;display:flex;min-height:0}
+  .msgs{
+    flex:1;overflow-y:auto;padding:20px 20px 8px;
+    display:flex;flex-direction:column;gap:14px;min-width:0;
+  }
+  .members{
+    width:190px;flex:0 0 auto;border-left:1px solid var(--border);
+    background:var(--panel);overflow-y:auto;padding:14px 0;
+  }
+  .members h4{font-size:12px;font-weight:500;color:var(--dim);padding:0 16px 10px;letter-spacing:.5px}
+  .member{display:flex;align-items:center;gap:9px;padding:6px 16px;font-size:13px}
+  .avatar{
+    width:26px;height:26px;border-radius:50%;flex:0 0 auto;
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:500;color:#fff;
+  }
+  .member span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ---------- message ---------- */
+  .row{display:flex;gap:9px;max-width:78%;animation:in .18s ease-out;position:relative}
+  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .row.mine{align-self:flex-end;flex-direction:row-reverse}
+  .row .avatar{margin-top:2px}
+  .bubblewrap{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .row.mine .bubblewrap{align-items:flex-end}
+  .meta{font-size:11.5px;color:var(--dim);padding:0 4px;display:flex;gap:8px}
+  .bubble{
+    background:var(--panel2);border:1px solid var(--border);
+    border-radius:var(--radius);padding:9px 13px;line-height:1.55;
+    word-break:break-word;white-space:pre-wrap;max-width:100%;
+  }
+  .row.mine .bubble{background:var(--accent);border-color:var(--accent);color:#fff}
+  .bubble img{display:block;max-width:min(360px,60vw);max-height:380px;border-radius:8px;cursor:zoom-in}
+  .bubble.imgb{padding:5px;line-height:0;overflow:hidden}
+  .bubble.file{padding:10px 12px;min-width:230px}
+  .filerow{display:flex;align-items:center;gap:11px}
+  .ficon{
+    width:38px;height:38px;border-radius:9px;flex:0 0 auto;
+    background:rgba(79,140,255,.15);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .row.mine .ficon{background:rgba(255,255,255,.2);color:#fff}
+  .ficon.gone{background:rgba(139,147,165,.15);color:var(--muted)}
+  .row.mine .ficon.gone{background:rgba(255,255,255,.14);color:rgba(255,255,255,.7)}
+  .fmeta{min-width:0;flex:1}
+  .fname{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+  .fsize{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .row.mine .fsize{color:rgba(255,255,255,.75)}
+  .fdl{
+    color:inherit;text-decoration:none;font-size:12px;opacity:.8;
+    border:1px solid currentColor;border-radius:6px;padding:3px 9px;white-space:nowrap;cursor:pointer;
+  }
+  .fdl:hover{opacity:1}
+  .gone-tag{
+    font-size:11px;color:var(--warn);border:1px solid rgba(240,180,41,.35);
+    border-radius:6px;padding:3px 8px;white-space:nowrap;
+  }
+  .row.mine .gone-tag{color:rgba(255,255,255,.85);border-color:rgba(255,255,255,.4)}
+  .prog{height:3px;background:rgba(127,127,127,.25);border-radius:2px;overflow:hidden;margin-top:8px}
+  .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .15s}
+  .row.mine .prog i{background:#fff}
+  .sys{align-self:center;font-size:12px;color:var(--dim);padding:2px 0;text-align:center;line-height:1.7}
+  .empty{margin:auto;text-align:center;color:var(--dim);line-height:2;font-size:13px}
+  .empty b{color:var(--muted);font-weight:500}
+  .daysep{align-self:center;font-size:11.5px;color:var(--dim);background:var(--panel2);
+    border-radius:999px;padding:3px 12px;margin:4px 0}
+  .msg-actions{
+    position:absolute;top:14px;display:flex;gap:3px;opacity:0;transition:.15s;
+  }
+  .row:hover .msg-actions{opacity:1}
+  .row.mine .msg-actions{left:-32px}
+  .row:not(.mine) .msg-actions{right:-32px}
+  .mini{
+    width:24px;height:24px;border-radius:6px;background:var(--panel2);
+    border:1px solid var(--border);color:var(--dim);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .mini:hover{color:var(--err);border-color:var(--err)}
+  @keyframes flash{0%,100%{background:transparent}25%{background:rgba(79,140,255,.2)}}
+  .flash{animation:flash 1.3s ease-out;border-radius:10px}
+
+  /* ---------- composer ---------- */
+  .composer{flex:0 0 auto;border-top:1px solid var(--border);background:var(--panel);padding:10px 14px 12px}
+  .inputline{display:flex;align-items:flex-end;gap:9px}
+  textarea{
+    flex:1;resize:none;background:var(--panel2);color:var(--text);
+    border:1px solid var(--border);border-radius:10px;
+    padding:10px 13px;font-size:14px;line-height:1.5;
+    max-height:140px;min-height:42px;
+  }
+  textarea:focus{border-color:var(--accent)}
+  .iconbtn{
+    width:42px;height:42px;flex:0 0 auto;border-radius:10px;
+    background:var(--panel2);border:1px solid var(--border);color:var(--muted);
+    display:flex;align-items:center;justify-content:center;transition:.15s;
+  }
+  .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .sendbtn{width:auto;padding:0 20px;height:42px;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:500;flex:0 0 auto}
+  .sendbtn:hover{background:var(--accent2)}
+  .sendbtn:disabled{opacity:.4}
+  .hint{font-size:11.5px;color:var(--dim);margin-top:7px;padding-left:2px}
+
+  /* ---------- overlay sheets ---------- */
+  .overlay{
+    position:fixed;inset:0;background:rgba(8,10,14,.72);z-index:150;
+    display:none;align-items:flex-start;justify-content:center;padding:6vh 20px 20px;
+    backdrop-filter:blur(3px);
+  }
+  .overlay.on{display:flex}
+  .sheet{
+    width:100%;max-width:760px;max-height:84vh;background:var(--panel);
+    border:1px solid var(--border);border-radius:16px;
+    display:flex;flex-direction:column;overflow:hidden;animation:sheetin .16s ease-out;
+  }
+  @keyframes sheetin{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+  .sheet-head{
+    display:flex;align-items:center;gap:11px;padding:14px 16px;
+    border-bottom:1px solid var(--border);flex:0 0 auto;
+  }
+  .sheet-head h3{font-size:15px;font-weight:500}
+  .sheet-head input[type=text]{
+    flex:1;background:var(--panel2);border:1px solid var(--border);
+    color:var(--text);border-radius:9px;padding:10px 13px;font-size:14px;
+  }
+  .sheet-head input[type=text]:focus{border-color:var(--accent)}
+  .filters{
+    display:flex;align-items:center;gap:8px;padding:11px 16px;flex-wrap:wrap;
+    border-bottom:1px solid var(--border);flex:0 0 auto;
+  }
+  select{
+    background:var(--panel2);border:1px solid var(--border);color:var(--text);
+    border-radius:8px;padding:6px 10px;font-size:12.5px;cursor:pointer;
+  }
+  select:focus{border-color:var(--accent)}
+  .sheet-body{flex:1;overflow-y:auto;padding:10px 12px;min-height:120px}
+  .sheet-foot{padding:12px 16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;flex:0 0 auto}
+  .panel-empty{text-align:center;color:var(--dim);font-size:13px;padding:44px 20px;line-height:1.9}
+  .dim{color:var(--dim);font-size:12px}
+
+  /* search result */
+  .sr{padding:10px 12px;border-radius:10px;cursor:pointer;transition:.13s;border:1px solid transparent}
+  .sr:hover{background:var(--panel2);border-color:var(--border)}
+  .sr-head{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--dim);margin-bottom:5px;flex-wrap:wrap}
+  .sr-name{color:var(--muted)}
+  .sr-body{font-size:13px;line-height:1.6;color:var(--text);word-break:break-word;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .tag{
+    background:var(--panel2);border:1px solid var(--border);border-radius:5px;
+    padding:1px 7px;font-size:11px;color:var(--muted);letter-spacing:.3px;
+  }
+  .tag.blue{color:var(--accent);border-color:rgba(79,140,255,.35);background:rgba(79,140,255,.1)}
+
+  /* room row */
+  .room{padding:13px 14px;border-radius:11px;background:var(--panel2);
+    border:1px solid var(--border);margin-bottom:9px}
+  .room-top{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+  .room-code{font-size:14px;font-weight:500;letter-spacing:.6px;color:var(--accent)}
+  .room-stats{font-size:11.5px;color:var(--dim);display:flex;gap:12px;flex-wrap:wrap}
+  .room-last{font-size:12.5px;color:var(--muted);margin-bottom:9px;line-height:1.5;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .room-acts{display:flex;gap:8px;flex-wrap:wrap}
+
+  /* ---------- drop overlay ---------- */
+  .drop{
+    position:absolute;inset:0;background:rgba(15,17,21,.9);
+    border:2px dashed var(--accent);border-radius:14px;
+    display:none;align-items:center;justify-content:center;
+    font-size:16px;color:var(--accent);z-index:50;margin:10px;
+  }
+  .drop.on{display:flex}
+
+  /* ---------- join overlay ---------- */
+  .join{
+    position:fixed;inset:0;background:radial-gradient(1000px 600px at 50% -10%,#1b2130,#0f1115);
+    display:flex;align-items:center;justify-content:center;padding:20px;z-index:100;overflow-y:auto;
+  }
+  .card{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:26px}
+  .card h1{font-size:19px;font-weight:500;margin-bottom:6px}
+  .card .sub{font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:20px}
+  .field{margin-bottom:15px}
+  .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:7px}
+  .field input{
+    width:100%;background:var(--panel2);border:1px solid var(--border);
+    color:var(--text);border-radius:9px;padding:11px 13px;font-size:14px;
+  }
+  .field input:focus{border-color:var(--accent)}
+  .rowline{display:flex;gap:9px}
+  .rowline input{flex:1}
+  .rowline button{padding:0 14px;border-radius:9px;background:var(--panel2);border:1px solid var(--border);color:var(--muted);font-size:13px;white-space:nowrap}
+  .rowline button:hover{border-color:var(--accent);color:var(--text)}
+  details.adv{margin:4px 0 16px;border-top:1px solid var(--border);padding-top:12px}
+  details.adv summary{font-size:12.5px;color:var(--muted);cursor:pointer;list-style:none}
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary::before{content:"+ ";color:var(--dim)}
+  details.adv[open] summary::before{content:"- "}
+  details.adv .field{margin-top:14px}
+  .seg{display:flex;gap:6px}
+  .seg button{flex:1;padding:8px 0;border-radius:8px;font-size:12.5px;background:var(--panel2);border:1px solid var(--border);color:var(--muted)}
+  .seg button.sel{background:rgba(79,140,255,.14);border-color:var(--accent);color:var(--accent)}
+  .note{font-size:11.5px;color:var(--dim);line-height:1.7;margin-top:16px;border-top:1px solid var(--border);padding-top:13px}
+  .note b{color:var(--muted);font-weight:500}
+  .toast{
+    position:fixed;left:50%;bottom:30px;transform:translateX(-50%);
+    background:#232833;border:1px solid var(--border);color:var(--text);
+    padding:10px 18px;border-radius:10px;font-size:13px;z-index:400;
+    opacity:0;transition:.2s;pointer-events:none;max-width:80vw;text-align:center;
+  }
+  .toast.on{opacity:1}
+  .lightbox{
+    position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:300;
+    display:none;align-items:center;justify-content:center;cursor:zoom-out;padding:30px;
+  }
+  .lightbox.on{display:flex}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px}
+
+  @media (max-width:820px){
+    .members{display:none}
+    .row{max-width:88%}
+    .brand span.t{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand"><span class="dot" id="statusDot"></span><span class="t">P2P 聊天室</span></div>
+    <div class="chip" id="roomChip" title="点击复制邀请链接">房间 <b id="roomCodeLabel">--</b></div>
+    <div class="spacer"></div>
+    <button class="icon-btn" id="searchBtn" title="搜索聊天记录">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>
+      </svg>
+    </button>
+    <button class="icon-btn" id="historyBtn" title="本地聊天记录">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9">
+        <path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3.5 2"/>
+      </svg>
+    </button>
+    <div class="online" id="onlineLabel">未连接</div>
+    <button class="btn ghost" id="leaveBtn" style="display:none">离开</button>
+  </div>
+
+  <div class="body">
+    <div class="msgs" id="msgs">
+      <div class="empty" id="empty">还没有消息<br><b>发送第一条，或把房间码分享给其他电脑</b></div>
+    </div>
+    <aside class="members" id="members">
+      <h4 id="membersTitle">在线成员</h4>
+      <div id="membersList"></div>
+    </aside>
+  </div>
+
+  <div class="composer">
+    <div class="inputline">
+      <button class="iconbtn" id="imgBtn" title="发送图片">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.8"/><path d="M21 15l-5-5L5 21"/>
+        </svg>
+      </button>
+      <button class="iconbtn" id="fileBtn" title="发送文件">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M21.4 11.05l-9.19 9.19a5 5 0 01-7.07-7.07l9.19-9.19a3.5 3.5 0 014.95 4.95l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+        </svg>
+      </button>
+      <textarea id="textInput" rows="1" placeholder="输入消息…  (Enter 发送 / Shift+Enter 换行)"></textarea>
+      <button class="sendbtn" id="sendBtn" disabled>发送</button>
+    </div>
+    <div class="hint" id="hintLine">消息点对点直传，聊天记录保存在本机</div>
+  </div>
+
+  <div class="drop" id="drop">松开即可发送文件</div>
+  <input type="file" id="imgPicker" accept="image/*" multiple hidden>
+  <input type="file" id="filePicker" multiple hidden>
+</div>
+
+<div class="overlay" id="searchOverlay">
+  <div class="sheet">
+    <div class="sheet-head">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8b93a5" stroke-width="1.9" style="flex:0 0 auto">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/>
+      </svg>
+      <input type="text" id="searchInput" placeholder="搜索聊天记录…">
+      <button class="btn ghost" id="searchClose">Esc</button>
+    </div>
+    <div class="filters">
+      <select id="searchScope">
+        <option value="all">全部房间</option>
+        <option value="current">当前房间</option>
+      </select>
+      <select id="searchKind">
+        <option value="all">全部类型</option>
+        <option value="text">仅文字</option>
+        <option value="image">仅图片</option>
+        <option value="file">仅文件</option>
+      </select>
+      <select id="searchRange">
+        <option value="0">全部时间</option>
+        <option value="1">今天</option>
+        <option value="7">近 7 天</option>
+        <option value="30">近 30 天</option>
+      </select>
+      <span class="spacer"></span>
+      <span class="dim" id="searchCount"></span>
+    </div>
+    <div class="sheet-body" id="searchResults">
+      <div class="panel-empty">输入关键词开始搜索<br>支持跨房间检索本地保存的全部记录</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="historyOverlay">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h3>本地聊天记录</h3>
+      <span class="spacer"></span>
+      <span class="dim" id="storageInfo"></span>
+      <button class="btn ghost" id="historyClose">Esc</button>
+    </div>
+    <div class="sheet-body" id="roomList"></div>
+    <div class="sheet-foot">
+      <span class="dim">文字永久保留 · 图片/文件 14 天后自动清理（保留记录）</span>
+      <span class="spacer"></span>
+      <button class="btn danger" id="clearAllBtn">清空全部本地记录</button>
+    </div>
+  </div>
+</div>
+
+<div class="join" id="joinScreen">
+  <div class="card">
+    <h1>创建一个 P2P 聊天室</h1>
+    <div class="sub">纯前端 · 无中心服务器 · 消息与文件点对点直传。<br>创建后把<b>房间码</b>或链接发给其他电脑即可加入。</div>
+
+    <div class="field">
+      <label>你的昵称</label>
+      <input id="nameInput" maxlength="16" placeholder="例如：WuFeng">
+    </div>
+
+    <div class="field">
+      <label>房间码（所有人填同一个）</label>
+      <div class="rowline">
+        <input id="roomInput" maxlength="32" placeholder="例如：a1b2c3">
+        <button id="randBtn" type="button">随机生成</button>
+      </div>
+    </div>
+
+    <details class="adv">
+      <summary>高级选项</summary>
+      <div class="field">
+        <label>房间密码（可选，留空则不加密）</label>
+        <input id="pwdInput" type="password" placeholder="填写相同密码的人才能互相看到">
+      </div>
+      <div class="field">
+        <label>信令通道（连不上时换一个试试）</label>
+        <div class="seg" id="stratSeg">
+          <button data-s="mqtt" class="sel">MQTT</button>
+          <button data-s="nostr">Nostr</button>
+          <button data-s="torrent">Tracker</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>自定义信令节点（可选，逗号分隔）</label>
+        <input id="relayInput" placeholder="wss://broker.emqx.io:8084/mqtt">
+      </div>
+    </details>
+
+    <button class="btn primary" id="enterBtn" style="width:100%;padding:12px;font-size:15px">进入聊天室</button>
+
+    <div class="note">
+      <b>聊天记录</b>：全部保存在本机浏览器（IndexedDB），房间关闭或对方离开都不会丢。文字永久保留，图片和文件 14 天后自动清理但保留记录。<br>
+      <b>为什么需要信令？</b> WebRTC 建立直连前要交换一次连接信息，这一步借用公共网络节点完成，连上后所有内容都是双方直传。<br>
+      <b>打不开或连不上？</b> 页面必须通过 <b>https://</b> 或 <b>localhost</b> 打开；若双方在严格的企业网/对称 NAT 后，换个信令通道或换一方网络再试。
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
+
+<script type="module">
+/* ============================================================
+   常量
+   ============================================================ */
+const TRYSTERO_VER = '0.26.0';
+const APP_ID = 'ccp-p2p-chat-v1';
+const FILE_TTL = 14 * 24 * 60 * 60 * 1000;   // 图片/文件本地保留 14 天
+const PAGE_SIZE = 500;                        // 单次加载消息条数
+const MAX_FILE = 100 * 1024 * 1024;           // 单文件 100MB
+const RELAY_PRESETS = {
+  mqtt: ['wss://broker.emqx.io:8084/mqtt', 'wss://test.mosquitto.org:8081/mqtt', 'wss://broker.hivemq.com:8884/mqtt'],
+  nostr: [],
+  torrent: []
+};
+const ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+];
+const AVATAR_COLORS = ['#4f8cff','#3ecf8e','#f0b429','#f0536b','#a78bfa','#22b8cf','#f97316','#ec4899'];
+
+const $ = id => document.getElementById(id);
+const state = {
+  room:null, name:'', roomId:'', strategy:'mqtt', pwd:'', relays:'',
+  peers:new Map(), actions:{}, joined:false, waitTimer:null,
+  persistOK:true, purgeTimer:null, urlCache:new Map(), loadedCount:0
+};
+
+/* ============================================================
+   小工具
+   ============================================================ */
+function uid(){
+  return (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
+    : Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('on'), 2400);
+}
+let _hintBase = '消息点对点直传，聊天记录保存在本机';
+function setHint(text){ $('hintLine').textContent = text || _hintBase; }
+function setHintHTML(html){ _hintBase = html; $('hintLine').innerHTML = html; }
+
+// Trystero 0.26 把事件与 action 回调从「方法调用」改成了「属性赋值」
+// （room.onPeerJoin = fn / action.onMessage = fn）。这里同时兼容两种风格。
+function bindHandler(target, name, cb){
+  const d = Object.getOwnPropertyDescriptor(target, name);
+  if(d && typeof d.value === 'function') return target[name](cb);
+  target[name] = cb;
+}
+async function copy(text){
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch(e){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    let ok=false; try{ ok=document.execCommand('copy'); }catch(_){}
+    ta.remove(); return ok;
+  }
+}
+function fmtSize(n){
+  n = n || 0;
+  if(n < 1024) return n + ' B';
+  if(n < 1048576) return (n/1024).toFixed(1) + ' KB';
+  if(n < 1073741824) return (n/1048576).toFixed(1) + ' MB';
+  return (n/1073741824).toFixed(2) + ' GB';
+}
+function fmtTime(ts){ return new Date(ts).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}); }
+function fmtFull(ts){
+  const d = new Date(ts);
+  return d.toLocaleDateString('zh-CN',{month:'2-digit',day:'2-digit'}) + ' ' + fmtTime(ts);
+}
+function fmtDay(ts){
+  const d = new Date(ts), n = new Date();
+  const same = (a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  if(same(d,n)) return '今天';
+  const y = new Date(n.getTime()-86400000);
+  if(same(d,y)) return '昨天';
+  return d.toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric'});
+}
+function daysLeft(ts){
+  return Math.max(0, Math.ceil((ts + FILE_TTL - Date.now()) / 86400000));
+}
+function colorOf(str){
+  let h=0; str = String(str||''); for(let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))>>>0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+function initial(name){ return (String(name||'?').trim().charAt(0) || '?').toUpperCase(); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function highlight(text, kw){
+  const safe = esc(text);
+  if(!kw) return safe;
+  const k = esc(kw).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if(!k) return safe;
+  try { return safe.replace(new RegExp('(' + k + ')', 'gi'), '<mark>$1</mark>'); }
+  catch(e){ return safe; }
+}
+function randCode(){
+  const s='abcdefghjkmnpqrstuvwxyz23456789'; let out='';
+  for(let i=0;i<6;i++) out += s[Math.floor(Math.random()*s.length)];
+  return out;
+}
+function debounce(fn, ms){
+  let h; return (...a)=>{ clearTimeout(h); h=setTimeout(()=>fn(...a), ms); };
+}
+
+/* ============================================================
+   IndexedDB 存储层
+   stores:
+     messages  keyPath id      index: roomId, ts, expireAt, roomId_ts
+     rooms     keyPath roomId
+   ============================================================ */
+const DB_NAME = 'p2pchat-db';
+const DB_VER = 1;
+const MIN_TS = -8.64e15, MAX_TS = 8.64e15;
+let _db = null;
+
+function openDB(){
+  if(_db) return Promise.resolve(_db);
+  return new Promise((resolve, reject)=>{
+    if(!self.indexedDB) return reject(new Error('浏览器不支持 IndexedDB'));
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if(!d.objectStoreNames.contains('messages')){
+        const s = d.createObjectStore('messages', { keyPath:'id' });
+        s.createIndex('roomId', 'roomId');
+        s.createIndex('ts', 'ts');
+        s.createIndex('expireAt', 'expireAt');
+        s.createIndex('roomId_ts', ['roomId', 'ts']);
+      }
+      if(!d.objectStoreNames.contains('rooms')){
+        d.createObjectStore('rooms', { keyPath:'roomId' });
+      }
+    };
+    req.onsuccess = () => { _db = req.result; resolve(_db); };
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('数据库被其他标签页占用'));
+  });
+}
+
+async function saveMessage(rec){
+  if(!state.persistOK) return;
+  try{
+    const d = await openDB();
+    await new Promise((res, rej)=>{
+      const t = d.transaction(['messages','rooms'], 'readwrite');
+      t.objectStore('messages').put(rec);
+      const rs = t.objectStore('rooms');
+      const g = rs.get(rec.roomId);
+      g.onsuccess = () => {
+        const r = g.result || { roomId: rec.roomId, createdAt: rec.ts };
+        r.lastActive = Math.max(r.lastActive || 0, rec.ts);
+        r.lastText = rec.kind === 'text' ? (rec.text || '').slice(0, 120)
+                   : ((rec.kind === 'image' ? '[图片] ' : '[文件] ') + (rec.fileName || ''));
+        rs.put(r);
+      };
+      t.oncomplete = res;
+      t.onerror = () => rej(t.error);
+    });
+  }catch(e){ console.warn('保存失败', e); }
+}
+
+async function deleteMessageById(id){
+  if(!state.persistOK) return;
+  try{
+    const d = await openDB();
+    await new Promise((res)=>{ const t=d.transaction('messages','readwrite'); t.objectStore('messages').delete(id); t.oncomplete=res; });
+  }catch(e){ console.warn(e); }
+}
+
+// 读取某房间最近 N 条（beforeTs 用于分页）
+async function getRoomMessages(roomId, limit, beforeTs){
+  const d = await openDB();
+  return new Promise((resolve)=>{
+    const out = [];
+    const t = d.transaction('messages');
+    const idx = t.objectStore('messages').index('roomId_ts');
+    const range = IDBKeyRange.bound([roomId, MIN_TS], [roomId, beforeTs == null ? MAX_TS : beforeTs]);
+    const req = idx.openCursor(range, 'prev');
+    req.onsuccess = e => {
+      const cur = e.target.result;
+      if(!cur || out.length >= limit) return resolve(out.reverse());
+      out.push(cur.value);
+      cur.continue();
+    };
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function getRooms(){
+  const d = await openDB();
+  return new Promise((resolve)=>{
+    const t = d.transaction(['rooms','messages']);
+    const req = t.objectStore('rooms').getAll();
+    req.onsuccess = () => {
+      const rooms = req.result || [];
+      if(!rooms.length) return resolve([]);
+      const mIdx = t.objectStore('messages').index('roomId');
+      let pending = rooms.length;
+      rooms.forEach(r => {
+        const c = mIdx.count(r.roomId);
+        c.onsuccess = () => { r.count = c.result; if(--pending === 0) resolve(rooms.sort((a,b)=>(b.lastActive||0)-(a.lastActive||0))); };
+        c.onerror = () => { r.count = 0; if(--pending === 0) resolve(rooms); };
+      });
+    };
+    req.onerror = () => resolve([]);
+  });
+}
+
+// 逐条游标扫描，内存友好
+async function scanMessages(filter){
+  const d = await openDB();
+  return new Promise((resolve)=>{
+    const out = [];
+    const t = d.transaction('messages');
+    const req = t.objectStore('messages').openCursor();
+    req.onsuccess = e => {
+      const cur = e.target.result;
+      if(!cur || out.length >= 800) return resolve(out);
+      const m = cur.value;
+      if(filter(m)) out.push(m);
+      cur.continue();
+    };
+    req.onerror = () => resolve(out);
+  });
+}
+
+// 清理过期文件：只删 Blob，保留文字记录与文件元信息
+async function purgeExpired(silent){
+  if(!state.persistOK) return 0;
+  try{
+    const d = await openDB();
+    const now = Date.now();
+    const n = await new Promise((resolve)=>{
+      let purged = 0;
+      const pending = [];
+      const t = d.transaction('messages', 'readwrite');
+      const store = t.objectStore('messages');
+      const idx = store.index('expireAt');
+      const req = idx.openCursor(IDBKeyRange.upperBound(now));
+      req.onsuccess = e => {
+        const cur = e.target.result;
+        if(!cur){                      // 第一遍只收集，遍历结束后再统一写入
+          for(const m of pending) store.put(m);
+          return;
+        }
+        const m = cur.value;
+        if(m.blob){ m.blob = null; m.expired = true; m.expiredAt = now; purged++; }
+        delete m.expireAt;             // 移出索引，避免下次重复扫描
+        pending.push(m);
+        cur.continue();
+      };
+      t.oncomplete = () => resolve(purged);
+      t.onerror = () => resolve(0);
+    });
+    if(n && !silent) toast('已清理 ' + n + ' 个过期文件（记录仍保留）');
+    return n;
+  }catch(e){ console.warn('清理失败', e); return 0; }
+}
+
+async function clearRoom(roomId){
+  const d = await openDB();
+  await new Promise((resolve)=>{
+    const keys = [];
+    const t = d.transaction(['messages','rooms'], 'readwrite');
+    const ms = t.objectStore('messages');
+    const cur = ms.index('roomId').openKeyCursor(IDBKeyRange.only(roomId));
+    cur.onsuccess = e => {
+      const c = e.target.result;
+      if(!c){ for(const k of keys) ms.delete(k); return; }   // 先收集主键，再删除
+      keys.push(c.primaryKey);
+      c.continue();
+    };
+    t.objectStore('rooms').delete(roomId);
+    t.oncomplete = resolve;
+    t.onerror = resolve;
+  });
+}
+
+async function clearAll(){
+  const d = await openDB();
+  await new Promise((resolve)=>{
+    const t = d.transaction(['messages','rooms'], 'readwrite');
+    t.objectStore('messages').clear();
+    t.objectStore('rooms').clear();
+    t.oncomplete = resolve;
+  });
+}
+
+async function storageInfo(){
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      const e = await navigator.storage.estimate();
+      const persisted = (navigator.storage.persisted) ? await navigator.storage.persisted() : false;
+      return { usage: e.usage || 0, quota: e.quota || 0, persisted };
+    }
+  }catch(e){}
+  return null;
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function makeAvatar(name){
+  const d = document.createElement('div');
+  d.className = 'avatar';
+  d.style.background = colorOf(name);
+  d.textContent = initial(name);
+  return d;
+}
+function hideEmpty(){ const e = $('empty'); if(e) e.remove(); }
+function atBottom(){
+  const el = $('msgs');
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+}
+function scrollBottom(force){
+  const el = $('msgs');
+  if(force || atBottom()) requestAnimationFrame(()=>{ el.scrollTop = el.scrollHeight; });
+}
+function addSystem(text){
+  hideEmpty();
+  const d = document.createElement('div');
+  d.className = 'sys'; d.textContent = text;
+  $('msgs').appendChild(d); scrollBottom(true);
+}
+function blobUrl(rec){
+  if(!rec.blob) return null;
+  if(state.urlCache.has(rec.id)) return state.urlCache.get(rec.id);
+  const u = URL.createObjectURL(rec.blob);
+  state.urlCache.set(rec.id, u);
+  return u;
+}
+
+let _lastDay = null;
+function insertDaySep(ts){
+  const label = fmtDay(ts);
+  if(label === _lastDay) return;
+  _lastDay = label;
+  const d = document.createElement('div');
+  d.className = 'daysep'; d.textContent = label;
+  $('msgs').appendChild(d);
+}
+
+function renderMessage(rec, silent){
+  hideEmpty();
+  insertDaySep(rec.ts);
+
+  const row = document.createElement('div');
+  row.className = 'row' + (rec.mine ? ' mine' : '');
+  row.dataset.id = rec.id;
+  row.appendChild(makeAvatar(rec.mine ? (state.name || '我') : (rec.name || '?')));
+
+  const wrap = document.createElement('div');
+  wrap.className = 'bubblewrap';
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.innerHTML = '<span>' + esc(rec.mine ? '我' : (rec.name || '匿名')) + '</span><span>' + fmtTime(rec.ts) + '</span>';
+  wrap.appendChild(meta);
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+
+  if(rec.kind === 'image'){
+    const url = rec.expired ? null : blobUrl(rec);
+    if(url){
+      bubble.classList.add('imgb');
+      const img = document.createElement('img');
+      img.src = url; img.alt = rec.fileName || 'image';
+      img.onclick = () => { $('lightboxImg').src = url; $('lightbox').classList.add('on'); };
+      bubble.appendChild(img);
+    } else {
+      bubble.classList.add('file');
+      bubble.appendChild(expiredCard(rec, true));
+    }
+  } else if(rec.kind === 'file'){
+    bubble.classList.add('file');
+    if(rec.expired || !rec.blob){
+      bubble.appendChild(expiredCard(rec, false));
+    } else {
+      const fr = document.createElement('div'); fr.className = 'filerow';
+      const ic = document.createElement('div'); ic.className = 'ficon';
+      ic.innerHTML = '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>';
+      const fm = document.createElement('div'); fm.className = 'fmeta';
+      fm.innerHTML = '<div class="fname">' + esc(rec.fileName || '文件') + '</div><div class="fsize">' + fmtSize(rec.fileSize) + '</div>';
+      const dl = document.createElement('a');
+      dl.className = 'fdl'; dl.textContent = '下载';
+      dl.href = blobUrl(rec);
+      dl.download = rec.fileName || 'file';
+      fr.append(ic, fm, dl);
+      bubble.appendChild(fr);
+    }
+  } else {
+    bubble.textContent = rec.text || '';
+  }
+
+  wrap.appendChild(bubble);
+  row.appendChild(wrap);
+
+  // hover 删除按钮
+  const acts = document.createElement('div');
+  acts.className = 'msg-actions';
+  const del = document.createElement('button');
+  del.className = 'mini'; del.title = '删除这条本地记录';
+  del.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+  del.onclick = async () => {
+    await deleteMessageById(rec.id);
+    if(state.urlCache.has(rec.id)){ URL.revokeObjectURL(state.urlCache.get(rec.id)); state.urlCache.delete(rec.id); }
+    row.remove();
+    toast('已删除这条本地记录');
+  };
+  acts.appendChild(del);
+  row.appendChild(acts);
+
+  $('msgs').appendChild(row);
+  if(!silent) scrollBottom();
+  return row;
+}
+
+function expiredCard(rec, isImg){
+  const fr = document.createElement('div'); fr.className = 'filerow';
+  const ic = document.createElement('div'); ic.className = 'ficon gone';
+  ic.innerHTML = isImg
+    ? '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M4 20L20 4"/></svg>'
+    : '<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M4 20L20 4"/></svg>';
+  const fm = document.createElement('div'); fm.className = 'fmeta';
+  fm.innerHTML = '<div class="fname" style="text-decoration:line-through;opacity:.6">' + esc(rec.fileName || (isImg ? '图片' : '文件')) + '</div>'
+    + '<div class="fsize">' + fmtSize(rec.fileSize) + ' · ' + fmtFull(rec.ts) + '</div>';
+  const tag = document.createElement('span'); tag.className = 'gone-tag'; tag.textContent = '已过期清理';
+  fr.append(ic, fm, tag);
+  return fr;
+}
+
+function renderMembers(){
+  const list = $('membersList');
+  list.innerHTML = '';
+  $('membersTitle').textContent = '在线成员 · ' + (state.peers.size + 1);
+  const self = document.createElement('div'); self.className = 'member';
+  self.appendChild(makeAvatar(state.name));
+  const s = document.createElement('span'); s.textContent = state.name + '（我）';
+  self.appendChild(s); list.appendChild(self);
+  for(const [id, p] of state.peers){
+    const d = document.createElement('div'); d.className = 'member';
+    d.appendChild(makeAvatar(p.name || id.slice(0,4)));
+    const n = document.createElement('span'); n.textContent = p.name || ('节点 ' + id.slice(0,4));
+    d.appendChild(n); list.appendChild(d);
+  }
+  $('onlineLabel').innerHTML = '<b>' + (state.peers.size + 1) + '</b> 人在线';
+}
+function setStatus(kind){
+  $('statusDot').className = 'dot' + (kind === 'on' ? ' on' : kind === 'wait' ? ' wait' : '');
+}
+
+/* ============================================================
+   连接
+   ============================================================ */
+async function loadHistory(roomId){
+  const list = await getRoomMessages(roomId, PAGE_SIZE);
+  state.loadedCount = list.length;
+  if(!list.length) return 0;
+  _lastDay = null;
+  for(const rec of list) renderMessage(rec, true);
+  scrollBottom(true);
+  if(list.length >= PAGE_SIZE) addSystem('（已加载最近 ' + list.length + ' 条，更早的记录可在「搜索」里查找）');
+  return list.length;
+}
+
+async function join(){
+  const name = $('nameInput').value.trim() || '匿名' + Math.floor(Math.random()*900+100);
+  const roomId = $('roomInput').value.trim();
+  if(!roomId){ toast('请填写房间码'); return; }
+  if(!/^[A-Za-z0-9_\-]{2,32}$/.test(roomId)){ toast('房间码只支持字母、数字、- 和 _'); return; }
+
+  state.name = name;
+  state.roomId = roomId;
+  state.pwd = $('pwdInput').value;
+  state.relays = $('relayInput').value.trim();
+  localStorage.setItem('p2pchat.name', name);
+
+  $('enterBtn').disabled = true;
+  $('enterBtn').textContent = '连接中…';
+
+  let mod;
+  try{
+    // Trystero 0.26 起信令策略拆分为独立包，旧写法 trystero/mqtt 已废弃并会直接抛错
+    mod = await import('https://esm.sh/@trystero-p2p/' + state.strategy + '@' + TRYSTERO_VER);
+    if(typeof mod.joinRoom !== 'function') throw new Error('模块导出异常');
+  }catch(e){
+    console.warn('信令模块加载失败', e);
+    toast('信令模块加载失败：' + (e && e.message || e));
+    $('enterBtn').disabled = false; $('enterBtn').textContent = '进入聊天室';
+    return;
+  }
+
+  const cfg = { appId: APP_ID, rtcConfig: { iceServers: ICE } };
+  if(state.pwd) cfg.password = state.pwd;
+  const relays = (state.relays ? state.relays.split(',') : RELAY_PRESETS[state.strategy])
+                  .map(s=>s.trim()).filter(Boolean);
+  if(relays.length){ cfg.relayUrls = relays; cfg.relayRedundancy = relays.length; }
+
+  let room;
+  try{ room = mod.joinRoom(cfg, roomId); }
+  catch(e){ toast('加入失败：' + e.message); $('enterBtn').disabled=false; $('enterBtn').textContent='进入聊天室'; return; }
+  state.room = room;
+
+  // Trystero 0.26 API：makeAction() 返回 { send, onMessage, onProgress, ... }
+  //   send(data, { target, metadata, onProgress })
+  //   onMessage(data, { peerId, ...metadata })
+  const A = {
+    hello: room.makeAction('hello'),
+    msg: room.makeAction('msg'),
+    file: room.makeAction('file')
+  };
+  state.actions = A;
+
+  A.hello.onMessage = (data, m) => {
+    const peerId = (m && m.peerId) || '';
+    const isNew = !state.peers.has(peerId);
+    state.peers.set(peerId, { name: (data && data.name) || peerId.slice(0,6) });
+    renderMembers();
+    if(isNew){ addSystem(((data && data.name) || '有人') + ' 加入了聊天室'); A.hello.send({ name: state.name }); }
+  };
+
+  A.msg.onMessage = (m, meta) => {
+    const peerId = (meta && meta.peerId) || '';
+    const p = state.peers.get(peerId);
+    const rec = {
+      id: uid(), roomId: state.roomId, ts: (m && m.ts) || Date.now(),
+      kind: 'text', mine: false, name: (p && p.name) || (m && m.name) || '匿名',
+      text: (m && m.text) || ''
+    };
+    saveMessage(rec);
+    renderMessage(rec);
+  };
+
+  A.file.onMessage = (data, meta) => {
+    const info = meta || {};
+    const peerId = info.peerId || '';
+    const p = state.peers.get(peerId);
+    const blob = new Blob([data], { type: info.mime || 'application/octet-stream' });
+    const isImg = info.kind === 'image';
+    const now = Date.now();
+    const rec = {
+      id: uid(), roomId: state.roomId, ts: now, mine: false,
+      kind: isImg ? 'image' : 'file', name: (p && p.name) || '匿名',
+      fileName: info.name || (isImg ? 'image' : 'file'),
+      fileSize: info.size || blob.size,
+      mime: info.mime || '', blob, expireAt: now + FILE_TTL
+    };
+    saveMessage(rec);
+    renderMessage(rec);
+  };
+
+  // 接收大文件时显示进度
+  A.file.onReceiveProgress = (pct) => {
+    const v = pct <= 1 ? pct * 100 : pct;
+    setHint('正在接收文件… ' + Math.min(100, v).toFixed(0) + '%');
+    if(v >= 99.5) setTimeout(()=>setHint(''), 900);
+  };
+
+  bindHandler(room, 'onPeerJoin', peerId => { A.hello.send({ name: state.name }); });
+  bindHandler(room, 'onPeerLeave', peerId => {
+    const p = state.peers.get(peerId);
+    if(p){ addSystem((p.name || '有人') + ' 离开了聊天室'); state.peers.delete(peerId); renderMembers(); }
+  });
+
+  state.joined = true;
+  $('joinScreen').style.display = 'none';
+  $('leaveBtn').style.display = '';
+  $('roomCodeLabel').textContent = roomId;
+  setStatus('wait');
+  renderMembers();
+  updateSendState();
+
+  // 加载本地历史
+  const n = await loadHistory(roomId);
+  if(n) addSystem('已从本机恢复 ' + n + ' 条历史记录');
+  else addSystem('已进入房间「' + roomId + '」');
+
+  const url = location.origin + location.pathname + '?room=' + encodeURIComponent(roomId);
+  setHintHTML('记录存于本机 · 邀请链接：' + esc(url));
+
+  clearTimeout(state.waitTimer);
+  state.waitTimer = setTimeout(()=>{
+    if(state.peers.size === 0){
+      addSystem('暂无其他人在线。把房间码分享出去，等待加入…');
+      setHintHTML('一直连不上？可能是信令网络不通 —— 换个信令通道，或换一方网络再进。');
+    }
+  }, 12000);
+}
+
+function leave(){
+  try{ state.room && state.room.leave(); }catch(e){}
+  location.href = location.origin + location.pathname;
+}
+
+/* ============================================================
+   发送
+   ============================================================ */
+function updateSendState(){
+  $('sendBtn').disabled = !state.joined || $('textInput').value.trim().length === 0;
+}
+function sendText(){
+  const text = $('textInput').value.trim();
+  if(!text || !state.joined) return;
+  const ts = Date.now();
+  const rec = { id: uid(), roomId: state.roomId, ts, kind: 'text', mine: true, name: state.name, text };
+  try{
+    const p = state.actions.msg.send({ text, ts, name: state.name });
+    if(p && p.catch) p.catch(e => console.warn('消息发送失败', e));
+  }catch(e){
+    toast('发送失败：' + ((e && e.message) || e));
+  }
+  saveMessage(rec);
+  renderMessage(rec);
+  $('textInput').value = ''; autoGrow(); updateSendState();
+}
+async function sendFiles(files){
+  if(!state.joined){ toast('请先进入聊天室'); return; }
+  for(const f of files){
+    if(f.size > MAX_FILE){ toast('「' + f.name + '」超过 100MB，已跳过'); continue; }
+    const isImg = /^image\//.test(f.type);
+    const meta = { name: f.name, mime: f.type || 'application/octet-stream', size: f.size, kind: isImg ? 'image' : 'file' };
+    const now = Date.now();
+    const rec = {
+      id: uid(), roomId: state.roomId, ts: now, mine: true,
+      kind: isImg ? 'image' : 'file', name: state.name,
+      fileName: f.name, fileSize: f.size, mime: f.type || '',
+      blob: f, expireAt: now + FILE_TTL
+    };
+    const row = renderMessage(rec);
+    saveMessage(rec);   // 先落盘，保证即使传输失败本地也有记录
+
+    const prog = document.createElement('div');
+    prog.className = 'prog';
+    prog.innerHTML = '<i style="width:0%"></i>';
+    const bar = prog.firstChild;
+    const bubble = row.querySelector('.bubble');
+    if(bubble) bubble.appendChild(prog);
+
+    try{
+      const buf = await f.arrayBuffer();
+      const p = state.actions.file.send(buf, {
+        metadata: meta,
+        onProgress: (pct) => {
+          const v = pct <= 1 ? pct * 100 : pct;
+          bar.style.width = Math.min(100, v).toFixed(0) + '%';
+        }
+      });
+      if(p && p.catch) p.catch(e => console.warn('文件发送失败', e));
+    }catch(e){
+      toast('「' + f.name + '」发送失败');
+    }
+    bar.style.width = '100%';
+    setTimeout(() => { try{ prog.remove(); }catch(e){} }, 700);   // 传完自动隐去进度条
+  }
+}
+function autoGrow(){
+  const t = $('textInput'); t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight, 140) + 'px';
+}
+
+/* ============================================================
+   搜索
+   ============================================================ */
+let searchToken = 0;
+const runSearch = debounce(async () => {
+  const kw = $('searchInput').value.trim();
+  const scope = $('searchScope').value;
+  const kind = $('searchKind').value;
+  const range = parseInt($('searchRange').value, 10) || 0;
+  const box = $('searchResults');
+  const my = ++searchToken;
+
+  if(!kw && kind === 'all' && !range){
+    $('searchCount').textContent = '';
+    box.innerHTML = '<div class="panel-empty">输入关键词开始搜索<br>支持跨房间检索本地保存的全部记录</div>';
+    return;
+  }
+
+  const since = range ? (Date.now() - range * 86400000) : 0;
+  const wantRoom = scope === 'current' ? state.roomId : null;
+
+  const hits = await scanMessages(m => {
+    if(wantRoom && m.roomId !== wantRoom) return false;
+    if(kind !== 'all' && m.kind !== kind) return false;
+    if(since && m.ts < since) return false;
+    if(!kw) return true;
+    const k = kw.toLowerCase();
+    if(m.kind === 'text') return (m.text || '').toLowerCase().includes(k);
+    return (m.fileName || '').toLowerCase().includes(k) || (m.name || '').toLowerCase().includes(k) || k === '[图片]' || k === '[文件]';
+  });
+
+  if(my !== searchToken) return;
+  hits.sort((a,b)=>b.ts - a.ts);
+  renderSearchResults(hits, kw);
+}, 180);
+
+function renderSearchResults(list, kw){
+  const box = $('searchResults');
+  $('searchCount').textContent = list.length ? ('命中 ' + list.length + ' 条' + (list.length >= 800 ? '+' : '')) : '';
+  if(!list.length){
+    box.innerHTML = '<div class="panel-empty">没有匹配的记录</div>';
+    return;
+  }
+  box.innerHTML = '';
+  list.slice(0, 300).forEach(m => {
+    const item = document.createElement('div');
+    item.className = 'sr';
+    const kindLabel = m.kind === 'image' ? '图片' : m.kind === 'file' ? '文件' : '文字';
+    const head = document.createElement('div');
+    head.className = 'sr-head';
+    head.innerHTML = '<span class="tag blue">' + esc(m.roomId) + '</span>'
+      + '<span class="sr-name">' + esc(m.mine ? '我' : (m.name || '匿名')) + '</span>'
+      + '<span>' + fmtFull(m.ts) + '</span>'
+      + '<span class="tag">' + kindLabel + (m.expired ? ' · 已过期' : '') + '</span>';
+    const body = document.createElement('div');
+    body.className = 'sr-body';
+    if(m.kind === 'text') body.innerHTML = highlight(m.text, kw);
+    else body.textContent = (m.fileName || '') + ' · ' + fmtSize(m.fileSize);
+    item.append(head, body);
+    item.onclick = () => jumpToMessage(m);
+    box.appendChild(item);
+  });
+}
+
+function jumpToMessage(m){
+  closeOverlays();
+  if(m.roomId === state.roomId && state.joined){
+    const el = document.querySelector('.row[data-id="' + CSS.escape(m.id) + '"]');
+    if(el){
+      el.scrollIntoView({ behavior:'smooth', block:'center' });
+      el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+      return;
+    }
+    toast('这条较旧，不在当前加载范围内（只展示最近 ' + PAGE_SIZE + ' 条）');
+  } else {
+    toast('这条属于房间「' + m.roomId + '」，用该房间码进入即可查看');
+  }
+}
+
+/* ============================================================
+   本地记录面板
+   ============================================================ */
+async function openHistory(){
+  $('historyOverlay').classList.add('on');
+  const box = $('roomList');
+  box.innerHTML = '<div class="panel-empty">读取中…</div>';
+
+  const [rooms, info] = await Promise.all([getRooms(), storageInfo()]);
+  $('storageInfo').textContent = info
+    ? ('已用 ' + fmtSize(info.usage) + ' / 配额 ' + fmtSize(info.quota) + (info.persisted ? ' · 已申请持久化' : ''))
+    : '';
+
+  if(!rooms.length){
+    box.innerHTML = '<div class="panel-empty">还没有本地记录<br>进入任意房间后，聊天内容会自动保存在本机</div>';
+    return;
+  }
+  box.innerHTML = '';
+  rooms.forEach(r => {
+    const d = document.createElement('div');
+    d.className = 'room';
+
+    const top = document.createElement('div'); top.className = 'room-top';
+    const code = document.createElement('span'); code.className = 'room-code'; code.textContent = r.roomId;
+    if(r.roomId === state.roomId){ const t = document.createElement('span'); t.className='tag blue'; t.textContent='当前'; top.appendChild(t); }
+    top.prepend(code);
+    d.appendChild(top);
+
+    const stats = document.createElement('div'); stats.className = 'room-stats';
+    stats.innerHTML = '<span>' + (r.count || 0) + ' 条记录</span>'
+      + '<span>最后活跃 ' + fmtFull(r.lastActive || r.createdAt || Date.now()) + '</span>';
+    d.appendChild(stats);
+
+    if(r.lastText){
+      const last = document.createElement('div'); last.className = 'room-last';
+      last.textContent = r.lastText; d.appendChild(last);
+    }
+
+    const acts = document.createElement('div'); acts.className = 'room-acts';
+    const bSearch = document.createElement('button'); bSearch.className='btn'; bSearch.textContent='搜索此房间';
+    bSearch.onclick = () => { closeOverlays(); openSearch(r.roomId); };
+    const bGo = document.createElement('button'); bGo.className='btn'; bGo.textContent='进入';
+    bGo.onclick = () => { location.href = location.origin + location.pathname + '?room=' + encodeURIComponent(r.roomId); };
+    const bExport = document.createElement('button'); bExport.className='btn'; bExport.textContent='导出 TXT';
+    bExport.onclick = () => exportRoom(r.roomId);
+    const bClear = document.createElement('button'); bClear.className='btn danger'; bClear.textContent='清空';
+    bClear.onclick = async () => {
+      if(!confirm('确定清空房间「' + r.roomId + '」的全部本地记录？此操作不可撤销。')) return;
+      await clearRoom(r.roomId);
+      toast('已清空该房间记录');
+      openHistory();
+    };
+    acts.append(bSearch, bGo, bExport, bClear);
+    d.appendChild(acts);
+    box.appendChild(d);
+  });
+}
+
+async function exportRoom(roomId){
+  const list = await getRoomMessages(roomId, 100000);
+  if(!list.length){ toast('该房间没有记录'); return; }
+  const lines = list.map(m => {
+    const who = m.mine ? '我' : (m.name || '匿名');
+    const t = new Date(m.ts).toLocaleString('zh-CN');
+    if(m.kind === 'text') return '[' + t + '] ' + who + ': ' + m.text;
+    return '[' + t + '] ' + who + ': [' + (m.kind === 'image' ? '图片' : '文件') + '] ' + (m.fileName || '')
+      + ' (' + fmtSize(m.fileSize) + ')' + (m.expired ? ' — 文件已过期清理' : '');
+  });
+  const head = '房间：' + roomId + '\n导出时间：' + new Date().toLocaleString('zh-CN') + '\n共 ' + list.length + ' 条记录\n' + '='.repeat(50) + '\n\n';
+  const blob = new Blob([head + lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'chat-' + roomId + '-' + Date.now() + '.txt';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  toast('已导出 ' + list.length + ' 条记录');
+}
+
+/* ============================================================
+   弹层控制
+   ============================================================ */
+function closeOverlays(){
+  $('searchOverlay').classList.remove('on');
+  $('historyOverlay').classList.remove('on');
+}
+function openSearch(prefillRoom){
+  $('historyOverlay').classList.remove('on');
+  $('searchOverlay').classList.add('on');
+  if(prefillRoom){
+    $('searchScope').value = prefillRoom === state.roomId ? 'current' : 'all';
+    $('searchInput').value = '';
+  }
+  setTimeout(()=>$('searchInput').focus(), 30);
+  if($('searchInput').value.trim()) runSearch();
+}
+
+/* ============================================================
+   事件绑定
+   ============================================================ */
+$('randBtn').onclick = () => { $('roomInput').value = randCode(); };
+$('enterBtn').onclick = join;
+$('leaveBtn').onclick = () => { if(confirm('确定离开聊天室？\n本地聊天记录会保留。')) leave(); };
+$('sendBtn').onclick = sendText;
+$('textInput').addEventListener('input', () => { autoGrow(); updateSendState(); });
+$('textInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter' && !e.shiftKey && !e.isComposing){ e.preventDefault(); sendText(); }
+});
+$('imgBtn').onclick = () => $('imgPicker').click();
+$('fileBtn').onclick = () => $('filePicker').click();
+$('imgPicker').onchange = e => { sendFiles([...e.target.files]); e.target.value=''; };
+$('filePicker').onchange = e => { sendFiles([...e.target.files]); e.target.value=''; };
+$('roomChip').onclick = async () => {
+  if(!state.roomId) return;
+  const url = location.origin + location.pathname + '?room=' + encodeURIComponent(state.roomId);
+  toast(await copy(url) ? '邀请链接已复制' : '复制失败，请手动复制');
+};
+$('lightbox').onclick = () => $('lightbox').classList.remove('on');
+
+$('searchBtn').onclick = () => openSearch();
+$('historyBtn').onclick = openHistory;
+$('searchClose').onclick = closeOverlays;
+$('historyClose').onclick = closeOverlays;
+$('searchInput').addEventListener('input', runSearch);
+$('searchScope').onchange = runSearch;
+$('searchKind').onchange = runSearch;
+$('searchRange').onchange = runSearch;
+$('clearAllBtn').onclick = async () => {
+  if(!confirm('确定清空本机保存的全部聊天记录？\n包括所有房间的文字、图片和文件，不可撤销。')) return;
+  await clearAll();
+  for(const u of state.urlCache.values()) URL.revokeObjectURL(u);
+  state.urlCache.clear();
+  toast('已清空全部本地记录');
+  openHistory();
+};
+
+[...$('stratSeg').children].forEach(b => b.onclick = () => {
+  [...$('stratSeg').children].forEach(x => x.classList.remove('sel'));
+  b.classList.add('sel'); state.strategy = b.dataset.s;
+});
+
+document.addEventListener('paste', e => {
+  if(!state.joined) return;
+  const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+  if(files.length){ e.preventDefault(); sendFiles(files); }
+});
+
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape') closeOverlays();
+  if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); openSearch(); }
+});
+
+let dragDepth = 0;
+window.addEventListener('dragenter', e => { e.preventDefault(); if(state.joined && ++dragDepth===1) $('drop').classList.add('on'); });
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('dragleave', () => { if(--dragDepth<=0){ dragDepth=0; $('drop').classList.remove('on'); } });
+window.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth=0; $('drop').classList.remove('on');
+  if(!state.joined) return;
+  const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+  if(files.length) sendFiles(files);
+});
+window.addEventListener('beforeunload', e => {
+  if(state.joined && state.peers.size > 0){ e.preventDefault(); e.returnValue=''; }
+});
+
+/* ============================================================
+   启动
+   ============================================================ */
+(async function init(){
+  // 申请持久化存储，避免浏览器在空间紧张时自动清除
+  try{
+    if(navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  }catch(e){}
+
+  // 预打开数据库，失败则降级为不落盘
+  try{ await openDB(); }
+  catch(e){
+    state.persistOK = false;
+    console.warn('IndexedDB 不可用，聊天记录将不会保存', e);
+  }
+
+  // 启动清理 + 每 30 分钟一次
+  if(state.persistOK){
+    purgeExpired(true);
+    state.purgeTimer = setInterval(()=>purgeExpired(true), 30 * 60 * 1000);
+  }
+
+  const saved = localStorage.getItem('p2pchat.name');
+  if(saved) $('nameInput').value = saved;
+  const q = new URLSearchParams(location.search).get('room');
+  $('roomInput').value = q ? q : randCode();
+  $('nameInput').focus();
+
+  if(!state.persistOK){
+    setHintHTML('⚠ 当前浏览器无法保存聊天记录（IndexedDB 不可用）');
+  }
+  if(location.protocol === 'file:'){
+    setHintHTML('⚠ 当前用 file:// 打开，部分浏览器会限制 WebRTC，建议用 http 本地服务或 https 访问');
+  }
+})();
+</script>
+</body>
+</html>

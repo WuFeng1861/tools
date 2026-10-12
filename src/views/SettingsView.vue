@@ -2,6 +2,8 @@
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { api } from "../api/tauri";
+import type { ResidualInfo } from "../types";
+import { runSweep } from "../residual";
 import {
   applyDisplay,
   loadDisplay,
@@ -81,7 +83,99 @@ onMounted(async () => {
   } catch {
     autostart.value = false;
   }
+  refreshResiduals();
 });
+
+// ---- 残留数据 ----
+// 工具换端口（用户确认「重新分配」）或被删除后，它旧端口上的
+// localStorage / IndexedDB 就访问不到了，成为留在磁盘上的残留。
+// 宿主会在该端口空闲时占回来清理 —— 这里让这件事可见、可手动触发。
+const residuals = ref<ResidualInfo[]>([]);
+const residualLoading = ref(false);
+const residualError = ref("");
+const toolNames = ref<Record<string, string>>({});
+
+function fmtMoment(ts: number): string {
+  if (!ts) return "未知";
+  return new Date(ts).toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+async function refreshResiduals() {
+  residualLoading.value = true;
+  residualError.value = "";
+  try {
+    const [list, tools] = await Promise.all([api.listResiduals(), api.listTools()]);
+    residuals.value = list;
+    toolNames.value = Object.fromEntries(tools.map((t) => [t.id, t.name]));
+  } catch (e) {
+    residualError.value = "读取残留数据失败：" + ((e as Error)?.message ?? String(e));
+  } finally {
+    residualLoading.value = false;
+  }
+}
+
+/** 这条残留来自哪个工具（工具可能已被删除） */
+function residualTool(r: ResidualInfo): string {
+  if (!r.toolId) return "未知来源";
+  return toolNames.value[r.toolId] || `${r.toolId}（已删除）`;
+}
+
+/** 用一句话说清「什么时候会被清理」 */
+function residualState(r: ResidualInfo): string {
+  switch (r.state) {
+    case "ready":
+      return "端口已空闲 · 下次扫描就会清理";
+    case "cleaning":
+      return "正在清理…";
+    case "busy-tool":
+      return "端口被运行中的工具占用 · 等该工具停止后自动清理";
+    case "busy-external":
+      return "端口被其它程序占用 · 等它释放后自动清理";
+    case "cooldown": {
+      const mins = Math.max(1, Math.ceil(((r.retryAfter || 0) - Date.now()) / 60000));
+      return `上次未完成 · 约 ${mins} 分钟后重试`;
+    }
+    default:
+      return r.state;
+  }
+}
+
+/** 手动触发一次清理：宿主占下空闲端口，App.vue 的隐藏 iframe 随即加载清理页。
+ *  传 force 是为了让「冷却中」的条目也能被立刻重试。 */
+async function cleanNow() {
+  residualError.value = "";
+  try {
+    await runSweep(true);
+    setTimeout(refreshResiduals, 2500); // 等清理页执行完回报宿主后再刷新
+  } catch (e) {
+    residualError.value = "清理失败：" + ((e as Error)?.message ?? String(e));
+  }
+}
+
+/** 端口被别的东西占用时，立即清理也没用 —— 按钮置灰，状态文字已说明原因 */
+function canCleanNow(r: ResidualInfo): boolean {
+  return r.state === "ready" || r.state === "cooldown";
+}
+
+/** 放弃清理：数据继续留在磁盘上，平台不再尝试 */
+async function ignoreOne(r: ResidualInfo) {
+  const ok = window.confirm(
+    `放弃清理端口 ${r.port} 上的残留数据？\n\n` +
+      `这些数据会继续留在磁盘上占用空间，平台不再尝试清理它。`,
+  );
+  if (!ok) return;
+  try {
+    await api.ignoreResidual(r.port);
+    await refreshResiduals();
+  } catch (e) {
+    residualError.value = "操作失败：" + ((e as Error)?.message ?? String(e));
+  }
+}
 </script>
 
 <template>
@@ -166,6 +260,45 @@ onMounted(async () => {
           </div>
           <button class="ghost" @click="router.push({ name: 'shortcuts' })">管理快捷键</button>
         </div>
+      </section>
+
+      <section class="block">
+        <h2>残留数据</h2>
+        <p class="desc">
+          工具「重新分配端口」或被删除后，它旧端口上的 localStorage / IndexedDB 就访问不到了，
+          成为留在磁盘上的残留。平台会在该端口空闲时把它占回来清理掉。
+        </p>
+
+        <p v-if="residualLoading" class="res-empty">读取中…</p>
+        <p v-else-if="!residuals.length" class="res-empty">当前没有残留数据。</p>
+        <template v-else>
+          <div v-for="r in residuals" :key="r.port" class="res-item">
+            <div class="res-main">
+              <div class="res-head">
+                <span class="res-port">:{{ r.port }}</span>
+                <span class="res-tool">{{ residualTool(r) }}</span>
+              </div>
+              <div class="res-state" :class="r.state">{{ residualState(r) }}</div>
+              <div class="res-time">登记于 {{ fmtMoment(r.at) }}</div>
+            </div>
+            <div class="res-acts">
+              <button
+                class="ghost"
+                :disabled="!canCleanNow(r)"
+                :title="canCleanNow(r) ? '' : '端口正被占用，等它释放后会自动清理'"
+                @click="cleanNow"
+              >
+                立即清理
+              </button>
+              <button class="ghost" @click="ignoreOne(r)">放弃</button>
+            </div>
+          </div>
+          <div class="res-foot">
+            <span>共 {{ residuals.length }} 个残留端口</span>
+            <button class="ghost" @click="refreshResiduals">刷新</button>
+          </div>
+        </template>
+        <p v-if="residualError" class="err">{{ residualError }}</p>
       </section>
 
       <section class="block">
@@ -269,6 +402,80 @@ onMounted(async () => {
   margin-top: 10px;
   font-size: 12px;
   color: var(--danger);
+}
+
+/* ---------- 残留数据 ---------- */
+.res-empty {
+  font-size: 13px;
+  color: var(--text-dim);
+  padding: 4px 0 2px;
+}
+.res-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  margin-bottom: 8px;
+}
+.res-main {
+  flex: 1;
+  min-width: 0;
+}
+.res-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.res-port {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 14px;
+  color: var(--accent);
+}
+.res-tool {
+  font-size: 13px;
+  font-weight: 500;
+}
+.res-state {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+.res-state.ready {
+  color: var(--ok);
+}
+.res-state.cleaning {
+  color: var(--accent);
+}
+.res-state.busy-external,
+.res-state.cooldown {
+  color: var(--danger);
+}
+.res-time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+  opacity: 0.8;
+}
+.res-acts {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.res-acts .ghost {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.res-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
 }
 .brightness {
   display: flex;

@@ -18,44 +18,134 @@ const router = useRouter();
     <main class="body">
       <section class="block">
         <h2>工具是什么？</h2>
+        <p>平台里有<strong>三种</strong>工具，按「要花多少力气」排列：</p>
+        <table>
+          <tr><th>类型</th><th>是什么</th><th>怎么加</th></tr>
+          <tr>
+            <td><code>url</code> 网址工具</td>
+            <td>直接加载一个外部网页，不跑本地进程</td>
+            <td rowspan="2">「新建 ▾ → 添加网址 / 本地网页」</td>
+          </tr>
+          <tr>
+            <td><code>static</code> 本地网页工具</td>
+            <td>把本地 HTML 文件/目录复制进来，由平台托管</td>
+          </tr>
+          <tr>
+            <td><code>local</code> 代码工具</td>
+            <td>HTML 界面 + Node.js 后端，能力最完整</td>
+            <td>「新建 ▾ → 写代码新建工具」</td>
+          </tr>
+        </table>
         <p>
-          一个工具 = <strong>一个 HTML 界面</strong>（<code>index.html</code>）+ <strong>一个 Node.js 后端</strong>（<code>app.js</code>）。
-          运行时每个工具是<strong>独立的 Node 进程 + 独立的随机端口</strong>，界面由主窗口的
-          iframe 加载，互不影响。你能用 Node.js 做任何事：文件读写、网络、npm 生态里的任意库。
+          三种工具界面都由主窗口的 iframe 加载，各自占用一个独立端口。这带来两个重要好处：
         </p>
+        <ul>
+          <li>
+            页面处在 <code>http://127.0.0.1:端口</code> 这个<strong>安全上下文</strong>下，
+            WebRTC、剪贴板、Service Worker 等「只有 https / localhost 才能用」的能力都可以用；
+          </li>
+          <li>
+            端口固定后 origin 稳定，<code>localStorage</code> / <code>IndexedDB</code>
+            能跨重启保存（详见下面「端口与本地存储」）。
+          </li>
+        </ul>
       </section>
 
       <section class="block">
-        <h2>三步创建一个工具</h2>
+        <h2>三步创建一个代码工具</h2>
         <ol>
-          <li>主页面点「新建工具」→ 填名称 → 选模板 → 创建</li>
+          <li>主页面 →「新建 ▾」→「写代码新建工具」→ 填名称 → 选模板 → 创建</li>
           <li>在编辑器中修改 <code>index.html</code>（界面）和 <code>app.js</code>（后端），Ctrl+S 保存</li>
-          <li>点「运行 ▶」查看效果；需要什么库就去「依赖管理」里安装</li>
+          <li>点「运行 ▶」查看效果；需要什么库就去「更多 ▾ → 依赖管理」里安装</li>
         </ol>
       </section>
 
       <section class="block">
+        <h2>不动代码：用网址或本地网页添加工具</h2>
+        <p>主页面 →「新建 ▾」→「添加网址 / 本地网页」，弹窗里有两个页签。</p>
+
+        <p class="sub">网址</p>
+        <ul>
+          <li>
+            填 <code>https://…</code> 任意地址，或 <code>http://127.0.0.1:端口</code> /
+            <code>http://localhost:端口</code> 的本地服务。
+          </li>
+          <li>页面由对方站点自己托管，存储也归它自己的域名。</li>
+          <li>
+            部分站点设了 <code>X-Frame-Options</code> / CSP <code>frame-ancestors</code>
+            禁止被嵌入，页面会空白 —— 工具页右上角有「用浏览器打开」兜底。
+          </li>
+        </ul>
+
+        <p class="sub">本地网页</p>
+        <ul>
+          <li>
+            填一个 <code>.html</code> / <code>.htm</code> 文件路径，或一个<strong>含 <code>index.html</code> 的目录</strong>
+            （整个目录会被复制，含同目录的 css / js / 图片；跳过 <code>node_modules</code> 与 <code>.git</code>）。
+          </li>
+          <li>
+            内容会复制到 <code>toolbox/&lt;id&gt;/</code>，由平台的内置静态服务托管，<strong>自包含</strong>：
+            之后改原文件不影响已添加的工具；要更新就重新添加一次，
+            或直接改 <code>toolbox/&lt;id&gt;/</code> 里的副本（静态服务不缓存，刷新即生效）。
+          </li>
+        </ul>
+
+        <p class="note">
+          为什么比直接双击 <code>.html</code> 好？双击是 <code>file://</code>，属于<strong>非安全上下文</strong>，
+          WebRTC、剪贴板、Service Worker 大多被浏览器直接禁用，存储行为也各浏览器不一致。
+          放到这里跑在 <code>http://127.0.0.1:固定端口</code>，这些问题一次解决。
+        </p>
+      </section>
+
+      <section class="block">
         <h2>目录结构</h2>
+        <p class="sub">代码工具（local）</p>
         <pre><code>toolbox/my-tool/
 ├── manifest.json    # 工具元信息（必填）
 ├── index.html       # 工具界面（必填）
 ├── app.js           # 工具后端（必填，Node.js）
 ├── package.json     # 依赖清单（由依赖管理页维护）
 └── node_modules/    # 已安装的 npm 库</code></pre>
+
+        <p class="sub">本地网页工具（static）</p>
+        <pre><code>toolbox/my-page/
+├── manifest.json    # 自动生成，也可以自己改
+├── index.html       # 入口页面（必填）
+└── …                # 同目录的 css / js / 图片等</code></pre>
+        <p class="note">没有 Node 后端，所以不需要 <code>app.js</code>，也不参与依赖管理。</p>
+
+        <p class="sub">网址工具（url）</p>
+        <pre><code>toolbox/my-link/
+└── manifest.json    # 只此一个文件，指向外部地址</code></pre>
       </section>
 
       <section class="block">
         <h2>manifest.json 字段</h2>
         <table>
           <tr><th>字段</th><th>说明</th></tr>
-          <tr><td><code>id</code></td><td>唯一标识，仅小写字母/数字/-/_</td></tr>
+          <tr><td><code>id</code></td><td>唯一标识，仅小写字母/数字/-/_；就是目录名</td></tr>
           <tr><td><code>name</code></td><td>显示名称</td></tr>
           <tr><td><code>version</code></td><td>版本号</td></tr>
           <tr><td><code>description</code></td><td>一句话描述（显示在启动器卡片上）</td></tr>
-          <tr><td><code>main</code></td><td>后端入口 JS，如 <code>app.js</code></td></tr>
-          <tr><td><code>html</code></td><td>界面文件，如 <code>index.html</code></td></tr>
-          <tr><td><code>port</code></td><td>0 = 运行时随机分配（推荐）</td></tr>
+          <tr>
+            <td><code>type</code></td>
+            <td>
+              <code>local</code>（默认，跑 Node）/ <code>static</code>（本地网页）/
+              <code>url</code>（外部网址）
+            </td>
+          </tr>
+          <tr><td><code>url</code></td><td>仅 <code>type: "url"</code> 用，外部地址</td></tr>
+          <tr><td><code>main</code></td><td>仅 <code>local</code> 用，后端入口 JS，如 <code>app.js</code></td></tr>
+          <tr><td><code>html</code></td><td><code>local</code> / <code>static</code> 的入口页面，如 <code>index.html</code></td></tr>
+          <tr>
+            <td><code>port</code></td>
+            <td><code>0</code> = 自动分配<strong>并记住</strong>（推荐）；填固定值则强制使用该端口</td>
+          </tr>
         </table>
+        <p class="note">
+          没有 <code>manifest.json</code> 的目录也有救：只要里面<strong>有 <code>index.html</code></strong>，
+          平台会自动按本地网页工具接管，并补生成一份 manifest.json（之后可在编辑器里改）。
+        </p>
       </section>
 
       <section class="block">
@@ -112,7 +202,86 @@ http.createServer((req, res) => {
           <li>工具后端打印的 <code>console.log</code> 会进「日志」抽屉</li>
           <li>改代码后点「重新加载」生效；编辑器里也可直接「运行 ▶」</li>
           <li>进程异常退出时启动器会显示「异常」状态，可查看日志排查</li>
+          <li>静态网页工具没有进程，所以没有日志，右上角只有「重新加载」</li>
         </ul>
+      </section>
+
+      <section class="block">
+        <h2>端口与本地存储（重要）</h2>
+        <p>
+          浏览器按 <strong>origin（协议 + 主机 + 端口）</strong>隔离存储。工具页是
+          <code>http://127.0.0.1:&lt;端口&gt;</code>，所以 <strong>端口就是存储桶编号</strong>：
+          端口一变就换了个桶，原来存的东西就「看不见」了（数据没被删，只是访问不到）。
+        </p>
+        <p>
+          因此平台会把每个工具第一次分配到的端口记在 <code>ports.json</code> 里，
+          之后每次启动都复用。效果是：
+        </p>
+        <ul>
+          <li>同一个工具重启后仍能读到自己上次写的数据</li>
+          <li>不同工具之间存储天然隔离、互不干扰</li>
+          <li>删除工具时会一并清掉它的端口记忆，避免将来同名工具继承旧数据</li>
+        </ul>
+        <p class="note">
+          想给工具写死一个端口，就在 manifest 里填 <code>port</code>；
+          但要清楚这个端口的 origin 决定了它的存储位置，别随便改。
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>工具打不开？可能是端口被占用</h2>
+        <p>
+          打开工具时如果它的记忆端口已被别人占用，平台<strong>不会擅自换端口</strong>
+          （换端口就是换存储位置），而是弹窗让你选：
+        </p>
+        <table>
+          <tr><th>选项</th><th>会发生什么</th></tr>
+          <tr>
+            <td><strong>先不启动</strong></td>
+            <td>什么都不做，返回启动器；下次打开会重新检查</td>
+          </tr>
+          <tr>
+            <td><strong>重试启动</strong></td>
+            <td>你去关掉占用端口的程序后点它 —— 端口没变，<strong>数据不丢</strong>（推荐）</td>
+          </tr>
+          <tr>
+            <td><strong>重新分配端口并启动</strong></td>
+            <td>
+              换个新端口启动。工具会换到新的存储位置，
+              之前的 <code>localStorage</code> / <code>IndexedDB</code> 就读不到了
+            </td>
+          </tr>
+        </table>
+        <p class="note">
+          另外两类情况：manifest 里<strong>写死</strong>的 <code>port</code> 被占用会直接报错；
+          后台常驻（<code>autoStart</code>）工具遇到冲突只记日志跳过，等你进界面再决定。
+        </p>
+      </section>
+
+      <section class="block">
+        <h2>残留数据（磁盘空间）</h2>
+        <p>
+          一旦选了「重新分配端口」，旧端口上的 <code>localStorage</code> / <code>IndexedDB</code>
+          就成了<strong>访问不到的残留</strong>。它不会自己消失 —— 同源策略不允许从外部删除
+          另一个来源的数据。平台会自动收拾：
+        </p>
+        <ol>
+          <li><strong>登记</strong>：旧端口记入 <code>residuals.json</code>（删除工具时也会登记）</li>
+          <li><strong>等空闲</strong>：约每 3 分钟检查一次；被占用就跳过，绝不去抢别人的端口</li>
+          <li>
+            <strong>占下并清理</strong>：一旦空闲，宿主自己监听那个端口，取得该 origin 的同源身份，
+            用一个不可见的 iframe 清掉里面的 localStorage / IndexedDB / Cache Storage /
+            Service Worker 注册，随后关闭端口
+          </li>
+        </ol>
+        <p>
+          <strong>更多 ▾ → 设置 → 残留数据</strong>里能看到当前有哪些残留、属于哪个工具、登记时间，
+          以及当前状态（空闲待清理 / 正在清理 / 被占用 / 冷却中）。每条提供两个操作：
+          <strong>立即清理</strong>（可跳过冷却倒计时）和 <strong>放弃</strong>（数据继续留在磁盘上，不再尝试）。
+        </p>
+        <p class="note">
+          不过还是建议优先选「重试启动」—— 清理属于事后补救，重试则数据完好无损。
+        </p>
       </section>
 
       <section class="block">
@@ -122,7 +291,7 @@ http.createServer((req, res) => {
           <li><strong>转入后台</strong>：窗口隐藏、继续在托盘运行，宿主与后台工具不中断；托盘<strong>左键单击/双击</strong>可重新打开主界面。</li>
           <li><strong>退出程序</strong>：真正结束，会停止宿主与所有工具进程。</li>
           <li>托盘<strong>右键</strong>菜单：显示主界面 / <strong>后台工具 ▸</strong>（点击直达某工具）/ 退出程序。</li>
-          <li>这个记忆选择可在 <strong>主界面 → ⚙️ 设置</strong> 里随时修改。</li>
+          <li>这个记忆选择可在 <strong>主界面 → 更多 ▾ → 设置</strong> 里随时修改。</li>
         </ul>
       </section>
 
@@ -154,7 +323,7 @@ http.createServer((req, res) => {
     "accel": "ctrl+shift+v", "action": "toggle-quick" }
 ]</code></pre>
         <ul>
-          <li>所有工具的快捷键集中在 <strong>主界面 → ⌨️ 快捷键</strong> 统一查看、修改、恢复默认，改动即时生效。</li>
+          <li>所有工具的快捷键集中在 <strong>主界面 → 更多 ▾ → 全局快捷键</strong> 统一查看、修改、恢复默认，改动即时生效。</li>
           <li>若同一组合键被<strong>多个动作</strong>占用，这两项都会标红「冲突」且不注册；改成冲突键时页面会拦截并提示（系统自身已占用也会有提示）。</li>
           <li>剪贴板历史示例默认声明了 <code>ctrl+shift+v</code>（唤起/收起快速面板）。</li>
         </ul>
@@ -219,7 +388,7 @@ fs.writeFileSync(path.join(__dirname, ".save-request.json"),
         <h2>给自己的工具加「全局快捷键 / 悬浮面板」</h2>
         <ol>
           <li>在 <code>manifest.json</code> 加 <code>shortcuts</code>（声明快捷键）和可选 <code>panels</code>（声明悬浮面板）。</li>
-          <li>重启平台，或到 <strong>⌨️ 快捷键</strong> 页点「刷新」，快捷键即完成注册（冲突项会标红）。</li>
+          <li>重启平台，或到 <strong>更多 ▾ → 全局快捷键</strong> 页点「刷新」，快捷键即完成注册（冲突项会标红）。</li>
           <li>把面板页（如 <code>quick.html</code>）放进工具目录 —— 它与 <code>index.html</code> 共用同一个后端端口，能直接 <code>fetch</code> 自己的 <code>/api/*</code>。</li>
           <li>在 <code>app.js</code> 加 <code>/__platform/shortcut</code> 路由处理你的动作；需要弹/收面板时就写 <code>.quick-open</code> / <code>.quick-close</code> 标记。</li>
         </ol>
@@ -251,11 +420,26 @@ fs.writeFileSync(path.join(__dirname, ".save-request.json"),
       <section class="block">
         <h2>常见问题</h2>
         <ul>
-          <li><strong>id 不能改吗？</strong> 可以，但只能用小写字母/数字/<code>-</code>/<code>_</code>，且 id 就是目录名。</li>
-          <li><strong>端口冲突？</strong> 用默认 <code>port: 0</code>，运行时自动分配空闲端口。</li>
-          <li><strong>能不能用外部编辑器？</strong> 可以，工具目录就在 <code>%APPDATA%\com.tools.platform\toolbox\</code>，外部写好后点「刷新」即可。</li>
+          <li>
+            <strong>手动放进 toolbox 的目录报「缺少 manifest.json」？</strong>
+            只要目录里有 <code>index.html</code>，平台现在会<strong>自动按本地网页工具接管</strong>
+            并补生成一份 manifest.json；两者都没有才会报错。也可以用
+            「新建 ▾ → 添加网址 / 本地网页」导入。
+          </li>
+          <li>
+            <strong>端口冲突？</strong> <code>port: 0</code> 会自动分配<strong>并记住</strong>、
+            之后一直复用，不再每次更换。若该端口被别人占用，打开工具时会弹窗让你选
+            「重试启动」或「重新分配端口」，详见上面「端口与本地存储」。
+          </li>
+          <li>
+            <strong>能不能用外部编辑器？</strong> 可以，工具目录就在
+            <code>%APPDATA%\com.tools.platform\toolbox\</code>，外部写好后点「刷新」即可。
+          </li>
           <li><strong>工具能互相通信吗？</strong> 默认隔离；如需共享数据，可把中间结果写到文件或调用对方的 <code>127.0.0.1:端口</code>。</li>
-          <li><strong>导出没弹“另存为”？</strong> 沙盒里网页弹窗一定会被禁，这是预期的三档兜底：先看提示条里的原因；平台够新会自动走原生弹窗；都没有才落默认下载目录。</li>
+          <li>
+            <strong>导出没弹「另存为」？</strong> 沙盒里网页弹窗一定会被禁，这是预期的三档兜底：
+            先看提示条里的原因；平台够新会自动走原生弹窗；都没有才落默认下载目录。
+          </li>
           <li><strong>后台出现两个平台？</strong> 见上面「单实例」一节：只留一个进程，托盘残留图标悬停即消失。</li>
         </ul>
       </section>

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ToolInfo, PackageInfo, ShortcutInfo } from "../types";
+import type { ToolInfo, PackageInfo, ShortcutInfo, StartOutcome, ResidualInfo } from "../types";
 
 /**
  * Tauri 命令的统一入口封装。
@@ -10,6 +10,30 @@ export const api = {
   listTools: (): Promise<ToolInfo[]> => invoke("list_tools"),
   createTool: (opts: { name: string; template: string }): Promise<string> =>
     invoke("create_tool", opts),
+  /** 添加 URL 工具（外部地址，不跑本地进程）。返回生成的工具 id */
+  addUrlTool: (opts: { url: string; name: string; icon?: string }): Promise<string> =>
+    invoke("add_url_tool", opts),
+  /**
+   * 添加本地网页工具：把 HTML 文件（或含 index.html 的目录）复制进 toolbox，
+   * 由宿主静态服务在固定端口上托管。返回生成的工具 id。
+   */
+  addStaticTool: (opts: { path: string; name: string; icon?: string }): Promise<string> =>
+    invoke("add_static_tool", opts),
+  /** 用系统默认浏览器打开地址（URL 工具被 X-Frame-Options 挡住时的兜底） */
+  openExternalUrl: (url: string): Promise<void> =>
+    invoke("open_external_url", { url }),
+
+  /**
+   * 触发一次「残留数据清理」，返回宿主已占下的端口列表。
+   * 调用方必须为每个端口渲染一次隐藏 iframe —— 只有同源页面能删掉自己的存储。
+   * `force` 用于用户手动点「立即清理」时忽略冷却时间。
+   */
+  sweepResiduals: (force = false): Promise<number[]> =>
+    invoke("sweep_residuals", { force }),
+  /** 残留数据清单（含当前状态），用于「有哪些残留、属于哪个工具、何时会清理」 */
+  listResiduals: (): Promise<ResidualInfo[]> => invoke("list_residuals"),
+  /** 放弃清理某个端口的残留数据（数据继续留在磁盘上，平台不再尝试） */
+  ignoreResidual: (port: number): Promise<void> => invoke("ignore_residual", { port }),
   listToolFiles: (id: string): Promise<string[]> =>
     invoke("list_tool_files", { id }),
   readToolFile: (id: string, path: string): Promise<string> =>
@@ -29,7 +53,13 @@ export const api = {
   /** 打开目录：id 为空打开整个工具箱目录（toolbox/），否则打开该工具目录 */
   openToolDir: (id?: string): Promise<void> =>
     invoke("open_tool_dir", { id: id ?? "" }),
-  startTool: (id: string): Promise<ToolInfo> => invoke("start_tool", { id }),
+  /**
+   * 启动工具。
+   * 返回 portBusy 表示「记忆端口被占用」，需要用户确认后才可传 reassignPort=true 重试
+   *（重新分配端口会换掉该工具的存储位置）。
+   */
+  startTool: (id: string, reassignPort = false): Promise<StartOutcome> =>
+    invoke("start_tool", { id, reassignPort }),
   stopTool: (id: string): Promise<void> => invoke("stop_tool", { id }),
   toolStatus: (id: string): Promise<ToolInfo> => invoke("tool_status", { id }),
   toolLogs: (id: string, tail?: number): Promise<string[]> =>

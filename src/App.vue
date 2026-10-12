@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { api } from "./api/tauri";
 import { applyDisplay, loadDisplay } from "./display";
+import { cleanupPorts, runSweep, disposeSweep } from "./residual";
 
 const router = useRouter();
 
@@ -159,6 +160,12 @@ const onSystemChange = () => {
   if (theme.value === "auto") apply();
 };
 
+// ---- 残留数据清理 ----
+// 清理逻辑与设置页共用（见 src/residual.ts）：宿主把「此刻空闲」的旧端口占下来，
+// 我们为每个端口渲染一个隐藏的同源 iframe 加载清理页 —— 只有真正在那个 origin
+// 下执行的页面才有权限删掉自己的 localStorage / IndexedDB。
+let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
 onMounted(async () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -183,10 +190,16 @@ onMounted(async () => {
   } catch {
     /* 非 Tauri 环境忽略 */
   }
+
+  // 等宿主起来后再跑首次清理，之后每 3 分钟一次
+  setTimeout(runSweep, 8000);
+  cleanupTimer = setInterval(runSweep, 3 * 60 * 1000);
 });
 
 onUnmounted(() => {
   mql.removeEventListener("change", onSystemChange);
+  if (cleanupTimer) clearInterval(cleanupTimer);
+  disposeSweep();
   try {
     unlistenClose?.();
     unlistenOpen?.();
@@ -211,6 +224,17 @@ onUnmounted(() => {
     <div v-if="notice" class="toast">{{ notice }}</div>
   </transition>
   <router-view />
+
+  <!-- 残留数据清理：宿主已占下这些旧端口，用不可见的同源 iframe 清掉里面的存储 -->
+  <iframe
+    v-for="p in cleanupPorts"
+    :key="'residual-' + p"
+    :src="`http://127.0.0.1:${p}/`"
+    class="residual-frame"
+    sandbox="allow-scripts allow-same-origin"
+    aria-hidden="true"
+    tabindex="-1"
+  />
 
   <!-- 关闭窗口选择弹窗 -->
   <div v-if="showCloseModal" class="modal-overlay" @click.self="showCloseModal = false">
@@ -277,6 +301,19 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* 残留清理用的不可见 iframe。注意必须保留尺寸（不能用 display:none），
+   否则部分内核可能不执行里面的脚本。 */
+.residual-frame {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .modal-overlay {
