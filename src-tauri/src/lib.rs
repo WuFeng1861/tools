@@ -1082,14 +1082,37 @@ fn shutdown_host(app: &tauri::AppHandle) {
         *guard
     };
     if let Some(pid) = pid_opt {
+        kill_tree(pid);
+    }
+    // 再兜底一次：host.lock 才是宿主的权威记录。历史缺陷下 host_pid 可能指向已被
+    // 回收的旧进程，而真正在跑的宿主只有锁知道；漏掉它就会留下占着工具端口的孤儿。
+    if let Ok(data_dir) = sidecar::Sidecar::data_dir(app) {
+        let lock_file = data_dir.join("host.lock");
+        if let Ok(raw) = fs::read_to_string(&lock_file) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(pid) = v["pid"].as_u64() {
+                    let pid = pid as u32;
+                    if Some(pid) != pid_opt && pid != std::process::id() {
+                        kill_tree(pid);
+                    }
+                }
+            }
+        }
+        // 清掉锁文件，避免下次启动被残留锁挡住
+        let _ = fs::remove_file(&lock_file);
+    }
+}
+
+/// Windows 下终止进程及其子进程树（忽略错误）
+fn kill_tree(pid: u32) {
+    #[cfg(windows)]
+    {
         let pid_str = pid.to_string();
         let mut cmd = std::process::Command::new("taskkill");
         cmd.args(["/pid", &pid_str, "/T", "/F"]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW，避免弹黑框
-        }
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW，避免弹黑框
         let _ = cmd.output();
     }
+    let _ = pid;
 }

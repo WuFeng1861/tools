@@ -11,6 +11,11 @@
  *  --data-dir  <dir>   用户数据目录（toolbox、logs、host-state.json 所在）
  *  --runtime   <dir>   resources/runtime（注入给工具进程的运行时帮助库）
  *  --npm-cli   <file>  resources/npm/bin/npm-cli.js（npm 执行入口）
+ *  --instance-id <id>  本次启动标识（Rust 生成，仅用于状态文件与日志可观测性）
+ *
+ * 单实例约束：同一 data-dir 只允许一个宿主存活（见 host.lock）。
+ * 已有活着的宿主时，本进程会把它的端口写回 host-state.json 后立即退出，
+ * 既不让 Rust 傻等超时，也避免多个宿主去绑同一批「记忆端口」而 EADDRINUSE。
  */
 
 "use strict";
@@ -58,6 +63,14 @@ const RESIDUALS_FILE = path.join(DATA_DIR, "residuals.json");
 const CLEANUP_TIMEOUT_MS = 60 * 1000;
 /** 一次清理未完成后的冷却时间，避免反复去占端口 */
 const CLEANUP_RETRY_COOLDOWN_MS = 10 * 60 * 1000;
+/** 宿主单实例锁：{ pid, port, at, instanceId } —— 一个平台只准有一个宿主 */
+const LOCK_FILE = path.join(DATA_DIR, "host.lock");
+/** 锁里的宿主进程还在但不响应 /health 时，容忍多久再判定僵死并接管 */
+const LOCK_GRACE_MS = 20 * 1000;
+/** 本次启动标识（由 Rust 通过 --instance-id 传入） */
+const INSTANCE_ID = String(
+  ARGS["instance-id"] || `${process.pid}-${Date.now()}`,
+);
 
 const ID_RE = /^[a-z0-9_-]+$/;
 const PORT_RANGE = [30000, 40000];
@@ -127,6 +140,132 @@ async function waitForListen(port, proc, timeoutMs = 4000) {
   }
   if (proc.exitCode != null) return false;
   return isPortListening(port, 300);
+}
+
+// ---------------------------------------------- 宿主单实例锁（防多宿主抢端口）
+/**
+ * 背景：Rust 侧一旦因「握手文件陈旧」反复重启，就会开出多个宿主进程；
+ * 它们各自 autoStart 同一批工具、去绑同一个记忆端口，只有第一个能绑上，
+ * 其余 EADDRINUSE 崩溃 —— 界面上表现为「端口被占用，无法启动」。
+ * 这里用 host.lock 把宿主数量收敛为 1。
+ */
+function pidAlive(pid) {
+  const n = Number(pid) || 0;
+  if (!n || n === process.pid) return false;
+  try {
+    process.kill(n, 0); // signal 0 只做存在性检查，Windows 同样适用
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+
+/** 探测某端口上的宿主是否真的在响应 */
+function probeHealth(port, timeoutMs = 800) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => {
+      if (!settled) {
+        settled = true;
+        resolve(v);
+      }
+    };
+    const req = http.get(
+      {
+        host: "127.0.0.1",
+        port: Number(port),
+        path: "/health",
+        timeout: timeoutMs,
+      },
+      (res) => {
+        res.resume();
+        done(res.statusCode === 200);
+      },
+    );
+    req.on("error", () => done(false));
+    req.on("timeout", () => {
+      req.destroy();
+      done(false);
+    });
+  });
+}
+
+async function readLock() {
+  try {
+    return JSON.parse(await fsp.readFile(LOCK_FILE, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/** 已有活着的宿主则返回 { pid, port }，否则 null（可安全接管） */
+async function findLiveHost() {
+  const info = await readLock();
+  if (!info) return null;
+  const pid = Number(info.pid) || 0;
+  const port = Number(info.port) || 0;
+  if (!pid || !port) return null;
+  if (!pidAlive(pid)) {
+    log(`发现残留锁（pid=${pid} 已不存在），直接接管`);
+    return null;
+  }
+  if (await probeHealth(port)) return { pid, port };
+  const age = Date.now() - (Number(info.at) || 0);
+  if (age > LOCK_GRACE_MS) {
+    log(
+      `锁中宿主 pid=${pid} port=${port} 已僵死 ${Math.round(age / 1000)}s，接管`,
+    );
+    return null;
+  }
+  log(
+    `锁中宿主 pid=${pid} port=${port} 暂未响应（${Math.round(age / 1000)}s），本进程让位`,
+  );
+  return { pid, port };
+}
+
+async function takeLock(port) {
+  try {
+    await fsp.writeFile(
+      LOCK_FILE,
+      JSON.stringify(
+        { pid: process.pid, port, at: Date.now(), instanceId: INSTANCE_ID },
+        null,
+        2,
+      ),
+    );
+  } catch (e) {
+    log(`写入 host.lock 失败: ${e.message}`);
+  }
+}
+
+function releaseLock() {
+  try {
+    fs.unlinkSync(LOCK_FILE);
+  } catch {
+    /* 锁文件不存在或已被清理 */
+  }
+}
+
+/** 写握手文件；pid 可显式指定（让位场景写的是在跑宿主的 pid） */
+async function writeState(port, pid) {
+  try {
+    await fsp.writeFile(
+      STATE_FILE,
+      JSON.stringify(
+        {
+          pid: pid || process.pid,
+          hostPort: port,
+          nodeVersion: process.version,
+          instanceId: INSTANCE_ID,
+          startedAt: timestamp(),
+        },
+        null,
+        2,
+      ),
+    );
+  } catch (e) {
+    log(`写入 host-state.json 失败: ${e.message}`);
+  }
 }
 
 /** 随机端口池 */
@@ -434,6 +573,7 @@ function shutdown() {
     }
     pool.release(state.port);
   }
+  releaseLock(); // 释放单实例锁，让下一次启动能正常接管
   process.exit(0);
 }
 
@@ -1329,6 +1469,33 @@ async function main() {
   await loadResiduals();
   await seedExampleTools();
 
+  // 单实例闸门：已有活着的宿主就让位，绝不开出第二个去抢同一批工具端口。
+  // 让位前把它真实的 pid/port 写回 host-state.json，Rust 端就能立刻握手成功。
+  const live = await findLiveHost();
+  if (live) {
+    await writeState(live.port, live.pid);
+    log(`已有宿主在运行 pid=${live.pid} port=${live.port}，本进程退出`);
+    process.exit(0);
+  }
+
+  const server = http.createServer(handle);
+  await new Promise((r) => server.listen(ARGS.port || 0, "127.0.0.1", r));
+  const hostPort = server.address().port;
+
+  // 先握手、后自拉起。老顺序是先 autoStart 再写文件，窗口期内 Rust 会读到
+  // 上一次运行留下的陈旧端口，误判为启动成功 —— 新宿主就此沦为孤儿。
+  await takeLock(hostPort);
+  await writeState(hostPort);
+
+  log(`宿主已启动 pid=${process.pid} port=${hostPort}`);
+  log(`toolbox=${TOOLBOX_DIR}`);
+  log(`runtime=${RUNTIME_DIR}`);
+  log(`npm-cli=${NPM_CLI}`);
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
+  process.on("exit", releaseLock);
+
   // 自拉起 autoStart 标记的后台常驻工具（best-effort，失败仅记录日志）
   const all = await scanTools();
   for (const m of all) {
@@ -1348,27 +1515,6 @@ async function main() {
       }
     }
   }
-
-  const server = http.createServer(handle);
-  await new Promise((r) => server.listen(ARGS.port || 0, "127.0.0.1", r));
-  const hostPort = server.address().port;
-
-  await fsp.writeFile(
-    STATE_FILE,
-    JSON.stringify(
-      { pid: process.pid, hostPort, nodeVersion: process.version, startedAt: timestamp() },
-      null,
-      2,
-    ),
-  );
-
-  log(`宿主已启动 pid=${process.pid} port=${hostPort}`);
-  log(`toolbox=${TOOLBOX_DIR}`);
-  log(`runtime=${RUNTIME_DIR}`);
-  log(`npm-cli=${NPM_CLI}`);
-
-  process.on("SIGTERM", shutdown);
-  process.on("SIGINT", shutdown);
 }
 
 main().catch((e) => {

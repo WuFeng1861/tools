@@ -15,25 +15,43 @@ use tauri::{AppHandle, Manager};
 pub struct Sidecar {
     pub host_port: Mutex<Option<u16>>,
     pub host_pid: Mutex<Option<u32>>,
+    /// 单飞锁：保证并发调用只会有一个真正去启动宿主，其余等它起来后复用端口。
+    /// 没有它时，启动瞬间并发的前端命令会各自 spawn 一个宿主进程。
+    start_lock: tokio::sync::Mutex<()>,
 }
 
 impl Sidecar {
     /// 确保宿主进程在运行（用 HTTP /health 探测），返回其 HTTP 端口
     pub async fn ensure(&self, app: &AppHandle) -> Result<u16, String> {
-        let existing = {
-            let guard = self.host_port.lock().unwrap();
-            (*guard).map(|v| v)
-        };
-        if let Some(port) = existing {
-            if host_alive(port).await {
-                return Ok(port);
-            }
+        if let Some(port) = self.live_port().await {
+            return Ok(port);
+        }
+        // 单飞：拿到锁后必须再查一次 —— 先到的调用可能已经把宿主起好了
+        let _guard = self.start_lock.lock().await;
+        if let Some(port) = self.live_port().await {
+            return Ok(port);
         }
         self.start(app).await
     }
 
+    /// 已登记端口若仍能响应 /health 就返回它，否则视为不可用
+    async fn live_port(&self) -> Option<u16> {
+        let port = { *self.host_port.lock().unwrap() }?;
+        if host_alive(port).await {
+            Some(port)
+        } else {
+            None
+        }
+    }
+
     /// 强制重启宿主（先清理旧进程，再启动新的）
     pub async fn restart(&self, app: &AppHandle) -> Result<u16, String> {
+        // 同样走单飞：并发自愈时，只有一个真的去重启，其余复用结果。
+        // 否则一次失联会被多个调用放大成连开好几个宿主。
+        let _guard = self.start_lock.lock().await;
+        if let Some(port) = self.live_port().await {
+            return Ok(port); // 已被别的调用抢修好了，不要再杀一遍健康的宿主
+        }
         let pid = { self.host_pid.lock().unwrap().map(|v| v) };
         if let Some(pid) = pid {
             kill_pid(pid);
@@ -58,6 +76,13 @@ impl Sidecar {
         let data_dir = Self::data_dir(app)?;
         fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
+        // 关键：先删掉上一次运行留下的握手文件。
+        // 否则 spawn 之后的第一次轮询就会读到陈旧的 hostPort/pid 并判定「启动成功」，
+        // 而真正新起的宿主无人回收 —— 多宿主抢同一批工具端口、界面报「端口被占用」
+        // 正是这么来的。
+        let state_file = Self::state_file(app)?;
+        let _ = fs::remove_file(&state_file);
+
         let resource_dir = app
             .path()
             .resource_dir()
@@ -81,6 +106,7 @@ impl Sidecar {
             ));
         }
 
+        let instance_id = format!("{}-{}", std::process::id(), now_millis());
         let mut cmd = std::process::Command::new(&node);
         cmd.args([
             host_js.to_string_lossy().into_owned(),
@@ -92,6 +118,8 @@ impl Sidecar {
             templates_dir.to_string_lossy().into_owned(),
             "--npm-cli".into(),
             npm_cli.to_string_lossy().into_owned(),
+            "--instance-id".into(),
+            instance_id,
         ]);
         // Windows 下隐藏控制台窗口（CREATE_NO_WINDOW）
         #[cfg(windows)]
@@ -99,29 +127,46 @@ impl Sidecar {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
-        let child = cmd.spawn().map_err(|e| format!("启动宿主失败: {e}"))?;
-        *self.host_pid.lock().unwrap() = Some(child.id());
+        let spawned = cmd.spawn().map_err(|e| format!("启动宿主失败: {e}"))?;
+        let spawned_pid = spawned.id();
+        *self.host_pid.lock().unwrap() = Some(spawned_pid);
 
-        // 等待宿主写出 host-state.json（含随机端口与 pid）
-        let state_file = Self::state_file(app)?;
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // 等待宿主写出 host-state.json（含随机端口与 pid）。
+        // 注意宿主可能「让位」：发现已有宿主在跑时，它会把对方真实的 pid/port 写进
+        // 这个文件再自行退出，因此读到的 pid 未必是本次 spawn 的进程。
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             if let Ok(raw) = fs::read_to_string(&state_file) {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
                     if let Some(p) = v["hostPort"].as_u64() {
                         let port = p as u16;
-                        *self.host_port.lock().unwrap() = Some(port);
-                        if let Some(pid) = v["pid"].as_u64() {
-                            *self.host_pid.lock().unwrap() = Some(pid as u32);
+                        if host_alive(port).await {
+                            *self.host_port.lock().unwrap() = Some(port);
+                            let pid = v["pid"]
+                                .as_u64()
+                                .map(|x| x as u32)
+                                .unwrap_or(spawned_pid);
+                            *self.host_pid.lock().unwrap() = Some(pid);
+                            return Ok(port);
                         }
-                        return Ok(port);
+                        // 文件已写出但端口尚不通（宿主正在让位或还在启动）→ 继续等
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_millis(150)).await;
         }
-        Err("宿主启动超时（未读到 host-state.json）".into())
+        // 超时：把本次 spawn 出来的进程收掉，免得留下无人回收的孤儿
+        kill_pid(spawned_pid);
+        Err("宿主启动超时（未读到有效的 host-state.json）".into())
     }
+}
+
+/// 当前毫秒时间戳（生成启动标识用，避免为此引入日期库依赖）
+fn now_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
 }
 
 /// 去除 Windows verbatim 路径前缀 `\\?\`（Node.js 不支持该前缀）
