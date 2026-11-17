@@ -1,0 +1,13 @@
+{
+  "name": "time-sync",
+  "version": "1.1.1",
+  "private": true,
+  "description": "自动识别系统的多源时间偏差检测与 Windows / Linux 校准",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {}
+}

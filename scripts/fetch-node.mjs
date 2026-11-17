@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
  * 准备 sidecar 运行时的本地资源：
- *   1) 复制 node.exe → binaries/node-<target-triple>.exe（externalBin 用）
+ *   1) Windows：复制 node.exe → src-tauri/resources/bin/node.exe
  *   2) 复制 npm 模块 → src-tauri/resources/npm（供宿主执行 npm install）
  *
  * 用法：
  *   node scripts/fetch-node.mjs
  *   node scripts/fetch-node.mjs --node <node.exe路径> --npm <npm目录>
  *
- * 默认使用当前 PATH 上的 node.exe 及其同目录 node_modules/npm。
- * 安装版打包前执行一次即可（产物已 gitignore）。
+ * Windows 默认使用当前 Node 及其同目录 node_modules/npm。
+ * Linux 只检查系统 Node/npm，不修改 Windows 资源。
  */
 import { execFileSync } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
@@ -38,6 +38,19 @@ function resolveNodeExe() {
 }
 
 const args = parseArgs(process.argv.slice(2));
+if (process.platform === "linux") {
+  // Linux 发行包使用系统 Node/npm，不覆盖 Windows 的内置运行时资源。
+  try {
+    const npmVersion = execFileSync("npm", ["--version"], {
+      encoding: "utf8", timeout: 30000,
+    }).trim();
+    console.log(`✓ Linux 使用系统 Node ${process.version} / npm ${npmVersion}，无需复制 node.exe 或 npm。`);
+    process.exit(0);
+  } catch (e) {
+    console.error(`无法运行系统 npm，请先安装 npm：${e.message}`);
+    process.exit(1);
+  }
+}
 const nodeExe = resolveNodeExe();
 if (!existsSync(nodeExe)) {
   console.error(`找不到 node.exe: ${nodeExe}`);

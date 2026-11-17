@@ -34,7 +34,9 @@
 ## 安装到平台
 
 1. 把 `example/consciousness-stream/` **整个目录**复制到平台工具目录：
-   Windows 为 `%APPDATA%\com.tools.platform\toolbox\`。
+   Windows 为 `%APPDATA%\com.tools.platform\toolbox\`；Linux 默认为
+   `~/.local/share/com.tools.platform/toolbox/`（或 `$XDG_DATA_HOME/com.tools.platform/toolbox/`）。
+   请一并复制新增加的 `legacy-paths.js`。
 2. 回到平台主页面点「刷新」，即出现「即意」图标。
 3. manifest 带 `autoStart: true`，平台下次启动会自动在后台常驻拉起（关掉界面也不停）。
 
@@ -47,6 +49,13 @@
 - **导入**：从快照导入历史数据（清单 / 条目 / 已完成），完成后自动刷新全部界面。
 
 推荐流程：先「导出」生成快照 → 再「导入」。若工具目录已预置 `data.json`，也可直接导入使用。
+
+Windows 继续查找 `%APPDATA%\即意\consciousness-stream.json` 和同级的
+`consciousness-stream` 目录。Linux 会查找 `$XDG_CONFIG_HOME/即意/consciousness-stream.json`
+和 `$XDG_CONFIG_HOME/consciousness-stream/consciousness-stream.json`；未设置 XDG_CONFIG_HOME 时
+使用 `~/.config/`。原版程序使用其他位置时，可在启动平台前设置
+`CONSCIOUSNESS_STREAM_LEGACY_FILE` 为原数据文件的绝对路径。
+日常数据仍保存在当前工具目录的 `data.json`；更新代码时保留该文件和 `legacy/`。
 
 ## 本地独立调试
 

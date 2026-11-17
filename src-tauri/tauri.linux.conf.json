@@ -1,0 +1,17 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["deb", "appimage"],
+    "resources": [
+      "resources/host/**/*",
+      "resources/runtime/**/*",
+      "resources/templates/**/*",
+      "resources/package.json"
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["nodejs (>= 18)", "npm", "xdg-utils"]
+      }
+    }
+  }
+}

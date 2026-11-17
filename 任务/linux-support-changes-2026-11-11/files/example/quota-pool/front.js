@@ -1,0 +1,443 @@
+// quota-pool 前端：账户 CRUD + 检查/签到 + 自动签到设置 + 日志
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const state = { editingId: null, ftype: "workbuddy", busy: false };
+
+  const els = {
+    acctEmpty: $("acct-empty"), acctTable: $("acct-table"), acctBody: $("acct-body"),
+    acctFeedback: $("acct-feedback"),
+    btnAdd: $("btn-add"), btnCheckAll: $("btn-check-all"), btnClaimAll: $("btn-claim-all"),
+    btnExport: $("btn-export"), btnImport: $("btn-import"), fileImport: $("file-import"),
+    form: $("acct-form"), formTitle: $("form-title"), typeSeg: $("f-type-seg"),
+    typeHint: $("type-hint"), remark: $("f-remark"),
+    access: $("f-access"), refresh: $("f-refresh"), uid: $("f-uid"), endpoint: $("f-endpoint"),
+    jwt: $("f-jwt"), device: $("f-device"),
+    formFeedback: $("form-feedback"),
+    btnCancelForm: $("btn-cancel-form"),
+    btnImportWb: $("btn-import-wb"),
+    btnTraeUrl: $("btn-trae-url"), traeUrl: $("trae-url"),
+    btnCopyTraeUrl: $("btn-copy-trae-url"), traeDeviceHint: $("trae-device-hint"),
+    traeCallback: $("trae-callback"), btnTraeDone: $("btn-trae-done"),
+    quickFeedback: $("quick-feedback"),
+    cHour: $("c-hour"),
+    btnSaveConfig: $("btn-save-config"), configFeedback: $("config-feedback"),
+    btnLogs: $("btn-logs"), logs: $("logs"),
+    toast: $("toast"),
+  };
+
+  const TYPE_HINTS = {
+    workbuddy: "WorkBuddy：必填备注 + accessToken（refreshToken 强烈建议一起填，否则 60 天后需重贴）。本机号更建议用上方“一键导入”。",
+    trae: "Trae：必填备注 + token(JWT) + deviceId（该账号绑定过的设备，错了 9074）。新号更建议用上方“扫码登录”，自带 refreshToken，过期可一键刷新。",
+  };
+
+  function toast(msg, isErr) {
+    els.toast.textContent = msg;
+    els.toast.className = "toast" + (isErr ? " error" : "");
+    clearTimeout(els.toast._t);
+    els.toast._t = setTimeout(() => els.toast.classList.add("hidden"), 2400);
+  }
+  function banner(el, ok, msg) {
+    if (!msg) { el.classList.add("hidden"); return; }
+    el.className = "banner " + (ok ? "ok" : "err");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+  async function api(path, opts) {
+    const resp = await fetch(path, {
+      headers: { "Content-Type": "application/json" },
+      ...(opts || {}),
+    });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data) throw new Error("HTTP " + resp.status);
+    if (data.ok !== true) throw new Error(data.error || "接口返回异常");
+    return data;
+  }
+  function fmtTime(ts) {
+    if (!ts) return "-";
+    const d = new Date(ts);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getMonth() + 1}/${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+  // ---------- 类型切换 ----------
+  function setType(t) {
+    state.ftype = t;
+    els.typeSeg.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.type === t));
+    els.typeHint.textContent = TYPE_HINTS[t];
+    document.querySelectorAll("[data-for]").forEach((el) => {
+      const kinds = el.getAttribute("data-for").split(/\s+/);
+      el.style.display = kinds.includes(t) ? "" : "none";
+    });
+  }
+  els.typeSeg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => setType(b.dataset.type)));
+
+  function fmtExpiry(ts) {
+    if (!ts) return "";
+    const d = new Date(Number(ts));
+    return `${d.getMonth() + 1}/${d.getDate()} 到期`;
+  }
+
+  // ---------- 快捷登录 ----------
+  async function importWorkBuddy(document) {
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/accounts/import-local", { method: "POST", body: JSON.stringify(document === undefined ? {} : { document }) });
+      banner(els.quickFeedback, true, `已导入 ${r.data.remark}，建议点一次“检查”确认。`);
+      loadAccounts();
+    } catch (e) { banner(els.quickFeedback, false, "导入失败：" + e.message); }
+  }
+  els.btnImportWb.addEventListener("click", () => importWorkBuddy());
+  $("btn-import-wb-file").addEventListener("click", () => $("wb-auth-file").click());
+  $("wb-auth-file").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    try { await importWorkBuddy(JSON.parse((await file.text()).replace(/^\uFEFF/, ""))); }
+    catch (e) { banner(els.quickFeedback, false, "无法读取登录态文件：" + e.message); }
+    event.target.value = "";
+  });
+  $("trae-local-file").addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    state.localTraeDevice = "";
+    state.traeLogin = null;
+    if (!file) return;
+    try {
+      const data = JSON.parse((await file.text()).replace(/^\uFEFF/, ""));
+      if (typeof data.device_id !== "string" || !data.device_id.trim()) throw new Error("文件中没有有效的 device_id");
+      state.localTraeDevice = data.device_id.trim();
+      banner(els.quickFeedback, true, "已读取设备信息，请重新生成登录链接。");
+    } catch (e) { banner(els.quickFeedback, false, "设备文件读取失败：" + e.message); }
+  });
+  els.btnTraeUrl.addEventListener("click", async () => {
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/trae/login-url", { method: "POST", body: JSON.stringify({ deviceId: state.localTraeDevice || "" }) });
+      state.traeLogin = { deviceId: r.data.deviceId, machineId: r.data.machineId };
+      els.traeUrl.textContent = r.data.loginUrl;
+      els.traeUrl.classList.remove("hidden");
+      els.btnCopyTraeUrl.classList.remove("hidden");
+      els.traeDeviceHint.textContent = r.data.reusedDevice
+        ? "已复用本机已绑定的 deviceId，直接登录即可。"
+        : "本机没找到已绑定 deviceId，将用随机 ID，签到可能 9074——建议先在 TraeWork 桌面端登录该账号一次再重生成。";
+    } catch (e) { banner(els.quickFeedback, false, "生成失败：" + e.message); }
+  });
+  els.btnCopyTraeUrl.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(els.traeUrl.textContent); toast("已复制登录链接"); }
+    catch { toast("复制失败，请手动复制", true); }
+  });
+  els.btnTraeDone.addEventListener("click", async () => {
+    const cb = els.traeCallback.value.trim();
+    if (!cb) { banner(els.quickFeedback, false, "请先粘贴浏览器回调链接"); return; }
+    if (!state.traeLogin) { banner(els.quickFeedback, false, "请先点“生成登录链接”"); return; }
+    banner(els.quickFeedback, true, "");
+    try {
+      const r = await api("/api/trae/login-callback", {
+        method: "POST",
+        body: JSON.stringify({ callbackUrl: cb, deviceId: state.traeLogin.deviceId, machineId: state.traeLogin.machineId }),
+      });
+      banner(els.quickFeedback, true, `登录成功：${r.data.remark}，已加入池子。`);
+      els.traeCallback.value = "";
+      loadAccounts();
+    } catch (e) { banner(els.quickFeedback, false, "登录失败：" + e.message); }
+  });
+  // ---------- 列表 ----------
+  function statusBadge(a) {
+    if (a.enabled === false) return '<span class="badge mute">停用</span>';
+    if (a.cooldownUntil && a.cooldownUntil > Date.now()) return '<span class="badge warn">冷却中</span>';
+    if (a.lastError) return '<span class="badge err">异常</span>';
+    if (a.lastCheck) return '<span class="badge ok">正常</span>';
+    return '<span class="badge mute">未检查</span>';
+  }
+  function quotaText(a) {
+    if (a.type !== "workbuddy" && a.type !== "trae") return "旧通用号（已移除中转，请删除）";
+    const c = a.credits != null ? `剩 ${a.credits}` : "剩 ?";
+    const bonus = a.signinCredits != null ? `（签到累计 ${a.signinCredits}）` : "";
+    const s = a.checkedIn == null ? "" : (a.checkedIn ? " · 已签" : " · 未签");
+    let detail = "";
+    if (Array.isArray(a.resources) && a.resources.length) {
+      const rows = a.resources.map((r) =>
+        `<div>${esc(r.name || "未知包")}｜${esc(r.unit || "?")}｜剩 ${esc(r.remaining)}` +
+        (r.cycleRemaining != null ? `｜周期剩 ${esc(r.cycleRemaining)}` : "") +
+        `｜status=${esc(r.status)}</div>`).join("");
+      detail = `<details class="res-detail"><summary>分包明细（${a.resources.length}）</summary>${rows}</details>`;
+    }
+    return esc(c + bonus + s) + detail;
+  }
+  async function loadAccounts() {
+    try {
+      const r = await api("/api/accounts");
+      const list = r.data || [];
+      els.acctEmpty.classList.toggle("hidden", list.length > 0);
+      els.acctTable.classList.toggle("hidden", !list.length);
+      els.acctBody.innerHTML = list.map((a) => `
+        <tr>
+          <td><div class="row-remark">${esc(a.remark)}</div>
+            <div class="row-sub">${esc(a.id)}${a.expiresAt ? " · " + esc(fmtExpiry(a.expiresAt)) : ""}${a.cooldownUntil > Date.now() ? " · 冷却至 " + fmtTime(a.cooldownUntil) : ""}</div></td>
+          <td>${esc(a.type)}${a.enabled === false ? "（停用）" : ""}</td>
+          <td>${statusBadge(a)}${a.lastError ? `<div class="row-sub">${esc(a.lastError)}</div>` : ""}</td>
+          <td>${quotaText(a)}</td>
+          <td>${fmtTime(a.lastCheck)}</td>
+          <td><div class="row-actions">
+            <button class="mini" data-act="check" data-id="${esc(a.id)}">检查</button>
+            ${(a.type === "workbuddy" || a.type === "trae") ? `<button class="mini" data-act="claim" data-id="${esc(a.id)}">签到</button>` : ""}
+            ${(a.type === "workbuddy" || a.type === "trae") ? `<button class="mini" data-act="refresh" data-id="${esc(a.id)}">刷新</button>` : ""}
+            <button class="mini" data-act="toggle" data-id="${esc(a.id)}">${a.enabled === false ? "启用" : "停用"}</button>
+            <button class="mini" data-act="edit" data-id="${esc(a.id)}">编辑</button>
+            <button class="mini danger" data-act="del" data-id="${esc(a.id)}">删除</button>
+          </div></td>
+        </tr>`).join("");
+    } catch (e) {
+      banner(els.acctFeedback, false, "加载账户失败：" + e.message);
+    }
+  }
+  els.acctBody.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest("button[data-act]");
+    if (!btn) return;
+    const { act, id } = btn.dataset;
+    try {
+      if (act === "del") {
+        if (!confirm("确定删除该账户吗？token 将一并清除。")) return;
+        await api("/api/accounts/delete", { method: "POST", body: JSON.stringify({ id }) });
+        toast("已删除");
+      } else if (act === "toggle") {
+        const cur = await api("/api/accounts");
+        const a = (cur.data || []).find((x) => x.id === id);
+        await api("/api/accounts/toggle", { method: "POST", body: JSON.stringify({ id, enabled: !(a && a.enabled !== false) }) });
+        toast("已切换");
+      } else if (act === "edit") {
+        openEdit(id);
+        return;
+      } else if (act === "check") {
+        btn.disabled = true;
+        const r = await api("/api/accounts/check", { method: "POST", body: JSON.stringify({ id }) });
+        const item = (r.data || [])[0];
+        banner(els.acctFeedback, item && item.ok, item ? (item.ok ? `${item.remark} 检查正常` : `${item.remark} 失败：${item.error}`) : "无结果");
+      } else if (act === "claim") {
+        btn.disabled = true;
+        const r = await api("/api/accounts/claim", { method: "POST", body: JSON.stringify({ id }) });
+        const item = (r.data || [])[0];
+        banner(els.acctFeedback, item && item.ok, item ? (item.ok ? `${item.remark}：${item.skipped ? item.reason : "签到成功"}` : `${item.remark} 失败：${item.error}`) : "无结果");
+      } else if (act === "refresh") {
+        btn.disabled = true;
+        await api("/api/accounts/refresh", { method: "POST", body: JSON.stringify({ id }) });
+        banner(els.acctFeedback, true, "刷新成功（accessToken 已更新）");
+      }
+    } catch (e) {
+      banner(els.acctFeedback, false, "操作失败：" + e.message);
+    } finally {
+      loadAccounts();
+    }
+  });
+
+  // ---------- 新增/编辑 ----------
+  function openAdd() {
+    state.editingId = null;
+    els.formTitle.textContent = "加入账户";
+    els.form.classList.remove("hidden");
+    els.form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  async function openEdit(id) {
+    try {
+      const r = await api("/api/accounts");
+      const a = (r.data || []).find((x) => x.id === id);
+      if (!a) { toast("账户不存在", true); return; }
+      state.editingId = id;
+      els.formTitle.textContent = "编辑账户（token 留空=不改）";
+      els.remark.value = "";
+      banner(els.formFeedback, true, `正在编辑 ${a.remark}（${a.type}）：token 类字段留空则保留原值，备注会直接覆盖。点保存前先在上方“备注”填回备注名。`);
+      els.form.classList.remove("hidden");
+      els.form.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (e) { toast(e.message, true); }
+  }
+  els.btnAdd.addEventListener("click", openAdd);
+  els.btnCancelForm.addEventListener("click", () => {
+    els.form.classList.add("hidden");
+    state.editingId = null;
+    banner(els.formFeedback, true, "");
+  });
+  els.form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    if (state.busy) return;
+    const remark = els.remark.value.trim();
+    if (!remark) { banner(els.formFeedback, false, "请先填备注名"); return; }
+    const patch = { remark, type: state.ftype };
+    // 编辑时空=不改，新增时按必填校验（后端会再拦一次）
+    const take = (el) => el.value.trim();
+    if (state.ftype === "workbuddy") {
+      if (take(els.access)) patch.accessToken = take(els.access);
+      else if (!state.editingId) patch.accessToken = "";
+      if (take(els.refresh)) patch.refreshToken = take(els.refresh);
+      if (take(els.uid)) patch.uid = take(els.uid);
+      if (take(els.endpoint)) patch.endpoint = take(els.endpoint);
+    } else if (state.ftype === "trae") {
+      if (take(els.jwt)) patch.token = take(els.jwt);
+      else if (!state.editingId) patch.token = "";
+      if (take(els.device)) patch.deviceId = take(els.device);
+    }
+    state.busy = true;
+    try {
+      if (!state.editingId) {
+        await api("/api/accounts", { method: "POST", body: JSON.stringify({ action: "create", account: patch }) });
+        banner(els.formFeedback, true, "已加入。建议点一次“检查”，正常再配下游。");
+      } else {
+        await api("/api/accounts", { method: "POST", body: JSON.stringify({ action: "update", id: state.editingId, patch }) });
+        banner(els.formFeedback, true, "已保存。");
+      }
+      els.form.reset();
+      setType(state.ftype);
+      loadAccounts();
+    } catch (e) {
+      banner(els.formFeedback, false, "保存失败：" + e.message);
+    } finally { state.busy = false; }
+  });
+
+  // ---------- 导入/导出 ----------
+  // 三档：①网页系统弹窗（独立浏览器里可用）→ ②平台原生弹窗（经工具后端文件桥接，
+  // 沙盒 iframe 下的主力通道）→ ③静默下载（最后兜底）。
+  async function pickSaveFile(suggestedName) {
+    if (typeof window.showSaveFilePicker !== "function") {
+      return { status: "unsupported", reason: "当前页面不支持网页弹窗 API" };
+    }
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName,
+        types: [{ description: "JSON 文件", accept: { "application/json": [".json"] } }],
+      });
+      return { status: "picked", handle };
+    } catch (e) {
+      if (e && e.name === "AbortError") return { status: "cancelled" };
+      return { status: "unsupported", reason: "网页弹窗被拦截：" + ((e && e.name) || e) };
+    }
+  }
+  async function blobFallback(name) {
+    const resp = await fetch("/api/accounts/export");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  els.btnExport.addEventListener("click", async () => {
+    const name = "quota-pool-accounts.json";
+    // ① 网页弹窗（手势有效期内先占住）
+    const picked = await pickSaveFile(name);
+    if (picked.status === "cancelled") return;
+    try {
+      const resp = await fetch("/api/accounts/export");
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      const blob = await resp.blob();
+      if (picked.status === "picked") {
+        const w = await picked.handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        toast("已保存（文件含 token 明文，妥善保管）");
+        return;
+      }
+    } catch (e) {
+      banner(els.acctFeedback, false, "导出失败：" + e.message);
+      return;
+    }
+    // ② 平台原生弹窗（文件桥接，需新版平台）
+    banner(els.acctFeedback, true, "");
+    toast("正在请求系统“另存为”窗口…");
+    try {
+      const r = await api("/api/accounts/export-save", { method: "POST", body: "{}" });
+      if (r.ok !== true) throw new Error(r.error || "保存失败");
+      toast("已保存（文件含 token 明文，妥善保管）");
+      banner(els.acctFeedback, true, "已保存到：" + r.data.path);
+      return;
+    } catch (e) {
+      const msg = e.message || "";
+      if (/取消/.test(msg)) {
+        banner(els.acctFeedback, true, "");
+        toast("已取消");
+        return;
+      }
+      if (!/超时|太旧/.test(msg)) {
+        banner(els.acctFeedback, false, "导出失败：" + msg);
+        return;
+      }
+      // 旧平台无桥接 → ③ 静默下载兜底
+    }
+    try {
+      await blobFallback(name);
+      toast("已导出到默认下载目录（含 token 明文，妥善保管）");
+      banner(els.acctFeedback, false,
+        "没弹出系统“另存为”窗口（" + picked.reason + "），且平台版本过旧无原生桥接，已回退默认下载。" +
+        "请更新平台后重试，或去下载目录查找文件。");
+    } catch (e) { banner(els.acctFeedback, false, "导出失败：" + e.message); }
+  });
+  els.btnImport.addEventListener("click", () => els.fileImport.click());
+  els.fileImport.addEventListener("change", async () => {
+    const f = els.fileImport.files && els.fileImport.files[0];
+    els.fileImport.value = "";
+    if (!f) return;
+    try {
+      const text = await f.text();
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch { throw new Error("文件不是合法 JSON"); }
+      const r = await api("/api/accounts/import", { method: "POST", body: JSON.stringify(parsed) });
+      const okN = (r.data.ok || []).length;
+      const fails = r.data.fail || [];
+      banner(els.acctFeedback, fails.length === 0,
+        `导入完成：成功 ${okN}，失败/跳过 ${fails.length}` +
+        (fails.length ? "：" + fails.map((x) => `${x.remark || "#" + x.index}（${x.error}）`).join("；") : ""));
+      loadAccounts();
+    } catch (e) { banner(els.acctFeedback, false, "导入失败：" + e.message); }
+  });
+
+  // ---------- 批量 ----------
+  els.btnCheckAll.addEventListener("click", async () => {
+    banner(els.acctFeedback, true, "");
+    try {
+      const r = await api("/api/accounts/check", { method: "POST", body: "{}" });
+      const ok = (r.data || []).filter((x) => x.ok).length;
+      banner(els.acctFeedback, ok > 0, `检查完成：${ok}/${(r.data || []).length} 正常`);
+    } catch (e) { banner(els.acctFeedback, false, e.message); }
+    loadAccounts();
+  });
+  els.btnClaimAll.addEventListener("click", async () => {
+    try {
+      const r = await api("/api/accounts/claim", { method: "POST", body: "{}" });
+      const ok = (r.data || []).filter((x) => x.ok).length;
+      banner(els.acctFeedback, ok > 0, `签到完成：${ok}/${(r.data || []).length} 成功（含已签跳过）`);
+    } catch (e) { banner(els.acctFeedback, false, e.message); }
+    loadAccounts();
+  });
+
+  // ---------- 自动签到设置 ----------
+  async function loadConfig() {
+    try {
+      const r = await api("/api/config");
+      const c = r.data || {};
+      els.cHour.value = c.autoSignHour ?? 9;
+    } catch { /* 忽略 */ }
+  }
+  els.btnSaveConfig.addEventListener("click", async () => {
+    try {
+      await api("/api/config", { method: "POST", body: JSON.stringify({ autoSignHour: Number(els.cHour.value) }) });
+      els.configFeedback.textContent = "已保存";
+      setTimeout(() => (els.configFeedback.textContent = ""), 2000);
+      loadConfig();
+    } catch (e) { toast(e.message, true); }
+  });
+
+  // ---------- 日志 ----------
+  async function loadLogs() {
+    try {
+      const r = await fetch("/api/logs?tail=200").then((x) => x.json());
+      els.logs.textContent = (r.data || []).join("\n") || "(暂无日志)";
+    } catch { els.logs.textContent = "(日志读取失败)"; }
+  }
+  els.btnLogs.addEventListener("click", loadLogs);
+
+  setType("workbuddy");
+  loadAccounts();
+  loadConfig();
+  loadLogs();
+})();

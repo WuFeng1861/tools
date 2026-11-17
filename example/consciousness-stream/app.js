@@ -9,6 +9,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { legacyPaths } = require("./legacy-paths");
 
 // ------------------------------------------------------------------ 运行时加载
 const MIME = {
@@ -130,10 +131,7 @@ const DIR = __dirname;
 const DATA_FILE = path.join(DIR, "data.json");
 const LEGACY_DIR = path.join(DIR, "legacy");
 
-const LEGACY_SOURCES = [
-  path.join(process.env.APPDATA || "", "即意", "consciousness-stream.json"),
-  path.join(process.env.APPDATA || "", "consciousness-stream", "consciousness-stream.json"),
-];
+const LEGACY_SOURCES = legacyPaths();
 
 const DEFAULT_DATA = {
   sessions: [],

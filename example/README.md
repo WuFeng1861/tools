@@ -58,6 +58,11 @@ example/ssh-connectivity-test/
 > 平台会自动扫描用户数据目录下的 `toolbox/`（Windows：`%APPDATA%\com.tools.platform\toolbox`），
 > 任何含 `manifest.json` 的子目录都会出现在启动器里。因此最简单的做法就是「复制目录」。
 
+Linux 对应目录默认为 `~/.local/share/com.tools.platform/toolbox/`，设置 `XDG_DATA_HOME` 时
+使用 `$XDG_DATA_HOME/com.tools.platform/toolbox/`；也可直接使用平台「新建 → 打开工具目录」。
+SSH 工具的网络代码不依赖 Windows 命令，依赖请在目标 Linux 上重新安装，不要复制 Windows 的
+`node_modules`。各工具的额外系统要求见各自 README，尤其是剪贴板的 X11/Wayland 依赖。
+
 ### 第 1 步：把案例放进工具箱
 
 1. 打开用户数据目录：按 `Win + R`，输入 `%APPDATA%\com.tools.platform\toolbox`，回车。

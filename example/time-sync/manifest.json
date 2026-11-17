@@ -1,0 +1,10 @@
+{
+  "id": "time-sync",
+  "name": "时间检测与校准",
+  "version": "1.1.1",
+  "description": "自动识别 Windows / Linux，多源检测与管理员校准；识别失败可手动确认，操作失败提供对应系统指引",
+  "icon": "🕰️",
+  "main": "app.js",
+  "html": "index.html",
+  "port": 0
+}

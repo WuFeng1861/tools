@@ -1,6 +1,9 @@
 mod commands;
 mod models;
+mod processes;
 mod sidecar;
+
+use processes::kill_tree;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -1103,16 +1106,3 @@ fn shutdown_host(app: &tauri::AppHandle) {
     }
 }
 
-/// Windows 下终止进程及其子进程树（忽略错误）
-fn kill_tree(pid: u32) {
-    #[cfg(windows)]
-    {
-        let pid_str = pid.to_string();
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/pid", &pid_str, "/T", "/F"]);
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW，避免弹黑框
-        let _ = cmd.output();
-    }
-    let _ = pid;
-}

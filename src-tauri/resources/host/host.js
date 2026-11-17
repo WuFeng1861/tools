@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 工具宿主进程 —— 由 Tauri 通过 sidecar(node.exe) 启动。
+ * 工具宿主进程 —— 由 Tauri 通过 Node.js 启动（Windows 内置，Linux 使用系统安装）。
  *
  * 职责：
  *  1. 扫描并注册 toolbox/ 下的工具（含 manifest.json 的目录）
@@ -49,7 +49,7 @@ function parseArgs(argv) {
 const ARGS = parseArgs(process.argv.slice(2));
 const DATA_DIR = path.resolve(ARGS["data-dir"] || ".");
 const RUNTIME_DIR = path.resolve(ARGS["runtime"] || "");
-const NPM_CLI = path.resolve(ARGS["npm-cli"] || "");
+const NPM_CLI = ARGS["npm-cli"] ? path.resolve(ARGS["npm-cli"]) : null;
 const TEMPLATES_DIR = path.resolve(ARGS["templates"] || "");
 
 const TOOLBOX_DIR = path.join(DATA_DIR, "toolbox");
@@ -532,19 +532,67 @@ async function sweepResiduals(force) {
   return claimed;
 }
 
-/** 终止进程树（Windows 下用 taskkill 保证子进程一并结束；隐藏控制台避免弹黑框） */
-function killTree(pid, cb) {
-  execFile(
-    "taskkill",
-    ["/pid", String(pid), "/T", "/F"],
-    { windowsHide: true },
-    () => cb && cb(),
-  );
+/**
+ * Linux 下「由本进程 spawn 且设置了 detached」的子进程 pid。
+ * 只有这些进程才是进程组组长，才可以按组（负 pid）清理；
+ * 否则对非组长使用负 pid 会打到它所属的组 —— 极端情况下就是宿主自己的组，
+ * 等于让宿主把自己 SIGKILL 掉。所以用登记表把这个前提显式化。
+ */
+const detachedGroups = new Set();
+
+/** Linux 子进程使用独立进程组，负 PID 可一次结束同组的子孙进程。 */
+function killTreeSync(pid) {
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return;
+  if (process.platform === "linux") {
+    const group = detachedGroups.has(pid);
+    try {
+      process.kill(group ? -pid : pid, "SIGKILL");
+    } catch (e) {
+      if (e.code !== "ESRCH") throw e;
+    }
+  } else {
+    execFileSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  }
+}
+
+/** Windows 保持 taskkill /T /F；等待结束后才把停止操作返回给界面。 */
+function killTree(proc) {
+  const pid = proc.pid;
+  if (process.platform === "linux") {
+    // 先订阅再发信号，避免停止刚返回、重启就遇到尚未释放的旧端口。
+    return new Promise((resolve, reject) => {
+      let timer;
+      const done = () => {
+        clearTimeout(timer);
+        proc.removeListener("close", done);
+        detachedGroups.delete(pid);
+        resolve();
+      };
+      proc.once("close", done);
+      timer = setTimeout(done, 2000);
+      try {
+        killTreeSync(pid);
+        if (proc.exitCode != null || proc.signalCode != null) done();
+      } catch (e) {
+        clearTimeout(timer);
+        proc.removeListener("close", done);
+        reject(e);
+      }
+    });
+  }
+  return new Promise((resolve) => {
+    execFile("taskkill", ["/pid", String(pid), "/T", "/F"],
+      { windowsHide: true }, () => resolve());
+  });
 }
 
 // ------------------------------------------------------------------ tools
 /** 运行中的工具状态表 */
 const runtimes = new Map(); // id -> { proc, port, ring, logFile, startedAt }
+const packageProcesses = new Set();
 
 /**
  * 优雅退出：先终止全部工具进程再退出。
@@ -563,15 +611,15 @@ function shutdown() {
       }
     } else if (state.proc) {
       try {
-        execFileSync("taskkill", ["/pid", String(state.proc.pid), "/T", "/F"], {
-          stdio: "ignore",
-          windowsHide: true,
-        });
+        killTreeSync(state.proc.pid);
       } catch {
         /* 进程已不存在 */
       }
     }
     pool.release(state.port);
+  }
+  for (const proc of packageProcesses) {
+    try { killTreeSync(proc.pid); } catch { /* 进程已不存在 */ }
   }
   releaseLock(); // 释放单实例锁，让下一次启动能正常接管
   process.exit(0);
@@ -1085,6 +1133,7 @@ async function startTool(id, opts = {}) {
   }
 
   const proc = spawn(process.execPath, [path.join(toolDir, m.main)], {
+    detached: process.platform === "linux",
     cwd: toolDir,
     env: {
       ...process.env,
@@ -1097,6 +1146,7 @@ async function startTool(id, opts = {}) {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (process.platform === "linux" && proc.pid) detachedGroups.add(proc.pid);
 
   const ring = makeRingBuffer();
   const logFile = path.join(LOGS_DIR, `${id}.log`);
@@ -1110,6 +1160,11 @@ async function startTool(id, opts = {}) {
   proc.stdout.on("data", onData);
   proc.stderr.on("data", onData);
   proc.on("exit", (code, signal) => {
+    // 主进程自行退出时也回收它启动的子进程，防止它们继续占用端口。
+    if (process.platform === "linux") {
+      try { killTreeSync(proc.pid); } catch (e) { log(`清理工具 ${id} 失败: ${e.message}`); }
+      detachedGroups.delete(proc.pid);
+    }
     ring.push(`[host] 进程退出 code=${code} signal=${signal}`);
     pool.release(port);
     if (runtimes.get(id) === state) runtimes.delete(id);
@@ -1134,7 +1189,7 @@ async function startTool(id, opts = {}) {
   if (!(await waitForListen(port, proc, 4000))) {
     runtimes.delete(id);
     pool.release(port);
-    killTree(proc.pid);
+    await killTree(proc);
     throw new Error(
       `工具未能正常监听端口 ${port}（进程可能已退出）：\n${ring.lines().slice(-8).join("\n")}`,
     );
@@ -1147,33 +1202,54 @@ async function startTool(id, opts = {}) {
 async function stopTool(id) {
   const state = runtimes.get(id);
   if (!state) return;
-  runtimes.delete(id);
-  if (state.server) {
-    // 静态工具：关掉宿主进程内的静态服务即可
-    try {
-      state.server.close();
-    } catch {
-      /* 忽略 */
+  // 无论清理是否成功，都要把状态和端口收回：否则进程已经没了，
+  // 界面上却永远显示「运行中」，用户只能重启平台。
+  try {
+    if (state.server) {
+      // 静态工具：关掉宿主进程内的静态服务即可
+      try {
+        state.server.close();
+      } catch {
+        /* 忽略 */
+      }
+    } else if (state.proc) {
+      await killTree(state.proc);
     }
-  } else if (state.proc) {
-    killTree(state.proc.pid);
+  } catch (e) {
+    log(`停止工具 ${id} 时清理进程失败: ${e.message}`);
+  } finally {
+    runtimes.delete(id);
+    if (process.platform === "linux" && state.proc) detachedGroups.delete(state.proc.pid);
+    pool.release(state.port);
   }
-  pool.release(state.port);
   log(`工具已停止 id=${id}`);
 }
 
 // ------------------------------------------------------------------ npm
 function runNpm(cwd, args) {
   return new Promise((resolve, reject) => {
-    if (!NPM_CLI || !fs.existsSync(NPM_CLI)) {
+    if (NPM_CLI && !fs.existsSync(NPM_CLI)) {
       return reject(new Error("npm 运行时未打包（缺少 npm-cli.js）"));
     }
+    if (!NPM_CLI && process.platform !== "linux") {
+      return reject(new Error("npm 运行时未打包（缺少 npm-cli.js）"));
+    }
+    // nvm / 自定义 Node 优先用同目录 npm，否则从桌面应用继承的 PATH 查找。
+    const adjacentNpm = path.join(path.dirname(process.execPath), "npm");
+    const command = NPM_CLI ? process.execPath : (fs.existsSync(adjacentNpm) ? adjacentNpm : "npm");
     log(`npm ${args.join(" ")} in ${cwd}`);
-    const proc = spawn(process.execPath, [NPM_CLI, ...args], {
+    const proc = spawn(command, NPM_CLI ? [NPM_CLI, ...args] : args, {
       cwd,
+      detached: process.platform === "linux",
+      env: process.platform === "linux" ? {
+        ...process.env,
+        PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ""}`,
+      } : process.env,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
     });
+    packageProcesses.add(proc);
+    if (process.platform === "linux" && proc.pid) detachedGroups.add(proc.pid);
     let out = "";
     const onData = (d) => {
       const s = String(d);
@@ -1182,8 +1258,16 @@ function runNpm(cwd, args) {
     };
     proc.stdout.on("data", onData);
     proc.stderr.on("data", onData);
-    proc.on("error", reject);
-    proc.on("exit", (code) => {
+    proc.on("error", (e) => {
+      packageProcesses.delete(proc);
+      if (process.platform === "linux") detachedGroups.delete(proc.pid);
+      reject(new Error(!NPM_CLI && e.code === "ENOENT"
+        ? "找不到系统 npm，请安装 npm 并确保桌面应用的 PATH 中包含 npm。"
+        : e.message));
+    });
+    proc.on("close", (code) => {
+      packageProcesses.delete(proc);
+      if (process.platform === "linux") detachedGroups.delete(proc.pid);
       if (code === 0) resolve(out);
       else reject(new Error(`npm 退出码 ${code}\n${out.slice(-1500)}`));
     });
@@ -1490,7 +1574,7 @@ async function main() {
   log(`宿主已启动 pid=${process.pid} port=${hostPort}`);
   log(`toolbox=${TOOLBOX_DIR}`);
   log(`runtime=${RUNTIME_DIR}`);
-  log(`npm-cli=${NPM_CLI}`);
+  log(`npm-cli=${NPM_CLI || "系统 npm"}`);
 
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);

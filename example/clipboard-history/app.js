@@ -1,5 +1,5 @@
 // 剪贴板历史工具后端 —— 后台常驻捕获文字/图片/文件历史，持久化到工具目录。
-// 依赖：仅 Node 内置模块 + 系统 PowerShell（零原生 npm 模块）。
+// Windows 使用 PowerShell；Linux 使用 X11 xclip / Wayland wl-clipboard，无 npm 依赖。
 "use strict";
 
 const fs = require("fs");
@@ -11,6 +11,10 @@ const readline = require("readline");
 const { spawn } = require("child_process");
 
 const { ToolServer } = require(process.env.TOOL_RUNTIME);
+const linuxClipboard = process.platform === "linux" ? require("./linux-clipboard").createLinuxClipboard() : null;
+let monitorError = "";
+let monitorRestart = null;
+let shuttingDown = false;
 
 const DIR = __dirname;
 const IMG_DIR = path.join(DIR, "images");
@@ -167,12 +171,13 @@ async function pushSnapshot(snap) {
     nl.files = files;
     nl.subText = files.join(" · ");
   } else if (snap.kind === "image") {
-    if (!snap.imageTemp || !fs.existsSync(snap.imageTemp)) return;
+    if (!snap.imageData && (!snap.imageTemp || !fs.existsSync(snap.imageTemp))) return;
     const id = newId();
     const fileName = id + ".png";
     try {
       await fsp.mkdir(IMG_DIR, { recursive: true });
-      await fsp.rename(snap.imageTemp, path.join(IMG_DIR, fileName));
+      if (snap.imageData) await fsp.writeFile(path.join(IMG_DIR, fileName), snap.imageData);
+      else await fsp.rename(snap.imageTemp, path.join(IMG_DIR, fileName));
     } catch {
       return;
     }
@@ -255,12 +260,17 @@ function runPs(script, env) {
     p.stdout.on("data", (d) => (out += String(d)));
     let err = "";
     p.stderr.on("data", (d) => (err += String(d)));
-    p.on("error", () => resolve({ out, err }));
-    p.on("exit", () => resolve({ out, err }));
+    p.on("error", (e) => resolve({ out: "err:" + e.message, err: e.message }));
+    p.on("close", (code) => resolve({ out: code === 0 ? out : "err:" + (err || out || `PowerShell 退出码 ${code}`), err }));
   });
 }
 
 async function pasteItem(item) {
+  if (linuxClipboard) {
+    const image = item.type === "image" ? await fsp.readFile(path.join(IMG_DIR, item.imageFile)) : null;
+    return linuxClipboard.write(item, image);
+  }
+  if (process.platform !== "win32") throw new Error("剪贴板功能支持 Windows 和 Linux");
   const env = { CLIP_MODE: item.type };
   if (item.type === "text") {
     const tmp = path.join(os.tmpdir(), "clip_txt_" + newId() + ".txt");
@@ -342,7 +352,15 @@ while ($true) {
 `;
 
 function startMonitor() {
-  if (state.watcher) return;
+  if (state.watcher || shuttingDown) return;
+  if (linuxClipboard) {
+    state.watcher = linuxClipboard.start(() => state.settings.pollIntervalMs, pushSnapshot, broadcast);
+    return;
+  }
+  if (process.platform !== "win32") {
+    monitorError = "剪贴板功能支持 Windows 和 Linux";
+    return;
+  }
   const p = spawn(
     "powershell",
     ["-NoProfile", "-STA", "-ExecutionPolicy", "Bypass", "-Command", MONITOR_SCRIPT],
@@ -361,25 +379,28 @@ function startMonitor() {
       /* 忽略无效行 */
     }
   });
-  p.on("error", (e) => console.error("[clipboard] 监控进程错误:", e.message));
-  p.on("exit", (code) => {
+  p.on("spawn", () => { monitorError = ""; broadcast(); });
+  p.on("error", (e) => { monitorError = "无法启动剪贴板监控：" + e.message; broadcast(); });
+  p.on("close", (code) => {
     console.log("[clipboard] 监控进程退出 code=" + code);
+    if (state.watcher !== p) return;
     state.watcher = null;
-    // 自动重拉，保证后台常驻
-    if (state.settings.monitoringEnabled) startMonitor();
+    if (state.settings.monitoringEnabled && !shuttingDown) monitorRestart = setTimeout(startMonitor, 5000);
   });
   state.watcher = p;
   console.log("[clipboard] 剪贴板监控已启动");
 }
 
 function stopMonitor() {
+  clearTimeout(monitorRestart);
   if (state.watcher) {
+    const watcher = state.watcher;
+    state.watcher = null;
     try {
-      state.watcher.kill();
+      watcher.kill();
     } catch {
       /* 忽略 */
     }
-    state.watcher = null;
   }
 }
 
@@ -407,7 +428,8 @@ server.route("/api/history", (req, res, body) => {
         (x.files || []).some((f) => f.toLowerCase().includes(q)),
     );
   }
-  res.json({ ok: true, data: { items: list, settings: state.settings } });
+  res.json({ ok: true, data: { items: list, settings: state.settings,
+    clipboard: linuxClipboard ? linuxClipboard.status() : { backend: process.platform, error: monitorError, sourceApp: process.platform === "win32" } } });
 });
 
 server.route("/api/delete", async (req, res, body) => {
@@ -466,9 +488,13 @@ server.route("/api/paste", async (req, res, body) => {
   }
   const it = state.items.find((x) => x.id === id);
   if (!it) return res.json({ ok: false, error: "记录不存在" });
-  const r = await pasteItem(it);
-  const ok = !(r && r.out.startsWith("err:"));
-  res.json({ ok, data: { done: true, out: r ? r.out.trim() : "" } });
+  try {
+    const r = await pasteItem(it);
+    const ok = !!r && !r.out.startsWith("err:");
+    res.json({ ok, error: ok ? undefined : (r?.out.slice(4) || "复制失败"), data: { done: ok, out: r ? r.out.trim() : "" } });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 server.route("/api/settings", (req, res, body) => {
@@ -553,5 +579,13 @@ server.start()
     console.log(`[clipboard] 剪贴板历史就绪 ${new Date().toISOString()}`);
   });
 
-process.on("SIGINT", () => stopMonitor());
-process.on("SIGTERM", () => stopMonitor());
+function shutdown() {
+  shuttingDown = true;
+  stopMonitor();
+  if (linuxClipboard) linuxClipboard.dispose();
+  for (const client of state.clients) client.end();
+  server.stop();
+  process.exit(0);
+}
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

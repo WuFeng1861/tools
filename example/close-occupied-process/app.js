@@ -1,7 +1,8 @@
 // =====================================================================
 // 关闭占用指定端口/进程的应用 —— 后端（Node.js，零第三方依赖）
 //
-// 职责（Windows 平台）：
+// Windows 使用 netstat/tasklist/taskkill；Linux 使用 /proc 和进程信号。
+// Windows 流程：
 //   端口模式：netstat -ano 反查占用端口的 PID → tasklist 取应用名 →
 //             taskkill /F /T 强制关闭（连带子进程树）
 //   PID 模式：tasklist 校验进程存在 → 取应用名 → taskkill 直接关闭
@@ -26,6 +27,7 @@ const execFileAsync = promisify(execFile);
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const linuxProcesses = process.platform === "linux" ? require("./linux-processes").createLinuxProcesses() : null;
 
 // ------------------------------------------------------------------
 // 工具运行时加载（与平台约定一致的三级回退）
@@ -171,6 +173,7 @@ function friendlySysError(err, cmd) {
  * 返回 [{ pid, proto, state }]；端口未出现时返回空数组。
  */
 async function findPidsByPort(port) {
+  if (linuxProcesses) return linuxProcesses.findPidsByPort(port);
   const r = await runCmd("netstat", ["-ano"]);
   if (!r.ok) throw new Error(friendlySysError(r.error, "netstat"));
 
@@ -205,6 +208,7 @@ async function findPidsByPort(port) {
  * 返回 null 表示该 PID 不存在。
  */
 async function getProcessName(pid) {
+  if (linuxProcesses) return linuxProcesses.getProcessName(pid);
   const r = await runCmd("tasklist", ["/FO", "CSV", "/NH", "/FI", `PID eq ${pid}`]);
   if (!r.ok) throw new Error(friendlySysError(r.error, "tasklist"));
   // CSV 首字段即映像名称，如 "chrome.exe","1234","Console",...
@@ -216,6 +220,7 @@ async function getProcessName(pid) {
  * 一次性构建 PID → 应用名 映射（端口占用可能对应多个 PID 时只调一次 tasklist）。
  */
 async function getProcessNameMap() {
+  if (linuxProcesses) return linuxProcesses.getProcessNameMap();
   const r = await runCmd("tasklist", ["/FO", "CSV", "/NH"]);
   if (!r.ok) throw new Error(friendlySysError(r.error, "tasklist"));
   const map = new Map();
@@ -236,6 +241,7 @@ async function getProcessNameMap() {
  * 成功返回 { pid, name }；失败抛出带中文信息的 Error。
  */
 async function killProcess(pid, name) {
+  if (linuxProcesses) return linuxProcesses.killProcess(pid, name);
   const r = await runCmd("taskkill", ["/PID", String(pid), "/F", "/T"]);
   if (!r.ok) {
     // taskkill 失败：execFile 下通常拿不到 stderr（stdout/stderr 为 undefined），
@@ -345,6 +351,7 @@ function buildResult(mode, input, killed, failures) {
 
 /** 入口分发：按 mode 走端口或 PID 流程 */
 async function handleKill(payload) {
+  if (!["win32", "linux"].includes(process.platform)) return { ok: false, error: "此工具支持 Windows 和 Linux" };
   const mode = payload && payload.mode === "pid" ? "pid" : "port";
   if (mode === "port") {
     const v = validatePort(payload && payload.value);

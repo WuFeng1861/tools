@@ -3,8 +3,42 @@
 > **tools 小工具平台**的一个后台常驻工具：自动记录你在系统里复制的文字 / 图片 / 文件，
 > 提供历史管理页和一个全局快捷键唤起的**便携悬浮面板**，随时回看、再复制。
 
-- 纯 Node.js（只用内置模块 + 系统 PowerShell），**零 npm 依赖**，开箱即用。
+- 纯 Node.js，**零 npm 依赖**。Windows 使用系统 PowerShell；Linux 使用 xclip 或 wl-clipboard。
 - manifest 里 `autoStart: true`：平台启动即自动在后台运行，界面关掉也不停。
+
+---
+
+## Linux 使用
+
+把整个工具目录复制到 `~/.local/share/com.tools.platform/toolbox/clipboard-history/`
+（设置了 `XDG_DATA_HOME` 时使用其下的 `com.tools.platform/toolbox/`），或从平台的
+「新建 → 打开工具目录」定位。新增加的 `linux-clipboard.js` 必须一起复制。
+
+- X11：安装 `xclip`，例如 Ubuntu/Debian 执行 `sudo apt install xclip`。
+- Wayland：安装 `wl-clipboard`，例如 `sudo apt install wl-clipboard`。
+- 从当前图形桌面会话启动平台，需要继承 `DISPLAY` 或 `WAYLAND_DISPLAY`。
+
+Linux 支持文字、PNG 图片和本地文件 URI 列表的记录与再复制，保留文字末尾换行。
+文件列表以“复制”语义写回，不执行文件移动。轮询/事件通知只在内容变化时入库。
+后台监控可关闭；已写回的剪贴板由工具持有，停止整个工具后可能失效，取决于桌面的剪贴板管理器。
+
+文字写回时 X11 用 `UTF8_STRING` 作为 target（Wayland 用 `text/plain;charset=utf-8`）：
+GTK / Qt 粘贴文字时直接请求 `UTF8_STRING`，不先看 TARGETS，只声明
+`text/plain;charset=utf-8` 会让它们取不到内容，表现为“复制成功但粘不出来”。
+写入后会用 `UTF8_STRING` 和 `text/plain;charset=utf-8` 两个 target 回读比对字节，
+一致才算成功。
+
+X11 按设置中的间隔读取；Wayland 使用 `wl-paste --watch` 监听事件，需要桌面支持
+data-control 后台剪贴板协议。不支持的桌面会显示具体错误，不会用持续抢焦点的方式轮询。
+Wayland 的行为和限制见 [wl-clipboard 官方说明](https://github.com/bugaevc/wl-clipboard)。
+双会话环境可通过 `TOOL_CLIPBOARD_BACKEND=x11` 或 `wayland` 显式选择；X11 模式只能读取
+该 X11/XWayland 会话所提供的剪贴板，不保证覆盖全部原生 Wayland 程序。
+
+Linux 不读取来源窗口名称，“显示来源应用”选项会禁用。缺少依赖、会话权限不足或复制失败时，
+完整页和快速面板会显示错误；Windows 的 PowerShell 监控与再复制路径保留。
+
+更新已安装的工具时，先停止工具，覆盖代码文件后再启动；保留 `history.json`、`settings.json`
+和 `images/`，以免覆盖自己的历史记录。
 
 ---
 

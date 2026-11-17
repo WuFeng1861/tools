@@ -6,6 +6,11 @@
   var searchEl = document.getElementById("q");
   var q = "";
   var items = [];
+  function notice(message) {
+    var el = document.getElementById("qnotice");
+    el.textContent = message || "";
+    el.style.display = message ? "block" : "none";
+  }
 
   function hide() {
     // 用普通 HTTP 通知工具后端写“关闭”标记，平台侧看到即隐藏面板。
@@ -81,7 +86,11 @@
     fetch(url)
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        if (j && j.ok) { items = j.data.items; render(); }
+        if (j && j.ok) {
+          items = j.data.items;
+          notice(j.data.clipboard && j.data.clipboard.error);
+          render();
+        }
       })
       .catch(function () {});
   }
@@ -104,7 +113,9 @@
     fetch("/api/paste", {
       method: "POST",
       body: JSON.stringify({ id: card.getAttribute("data-id") }),
-    }).catch(function () {});
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      notice(j.ok ? "" : (j.error || "复制失败"));
+    }).catch(function () { notice("复制失败，无法连接工具后端"); });
     searchEl.focus();
   });
 

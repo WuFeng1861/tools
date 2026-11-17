@@ -433,7 +433,10 @@ fs.writeFileSync(path.join(__dirname, ".save-request.json"),
           </li>
           <li>
             <strong>能不能用外部编辑器？</strong> 可以，工具目录就在
-            <code>%APPDATA%\com.tools.platform\toolbox\</code>，外部写好后点「刷新」即可。
+            Windows：<code>%APPDATA%\com.tools.platform\toolbox\</code>；
+            Linux 默认：<code>~/.local/share/com.tools.platform/toolbox/</code>
+            （设置了 XDG_DATA_HOME 时使用该目录下的 <code>com.tools.platform/toolbox/</code>）。
+            也可点「新建 → 打开工具目录」直接打开，外部写好后点「刷新」即可。
           </li>
           <li><strong>工具能互相通信吗？</strong> 默认隔离；如需共享数据，可把中间结果写到文件或调用对方的 <code>127.0.0.1:端口</code>。</li>
           <li>

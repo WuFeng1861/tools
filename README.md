@@ -22,7 +22,8 @@
 ## 快速开始（开发）
 
 ```bash
-# 1. 准备 sidecar 运行时资源（复制 node.exe 与 npm 模块）
+# 1. Windows：准备 sidecar 运行时资源（复制 node.exe 与 npm 模块）
+#    Linux：使用系统 Node.js/npm，可跳过这一步
 node scripts/fetch-node.mjs
 
 # 2. 启动开发环境
@@ -32,9 +33,71 @@ npm run tauri dev
 
 首次 `cargo` 编译较慢（需下载并编译 Rust 依赖）。
 
+## Linux 使用与构建
+
+Linux 使用系统安装的 **Node.js（至少 18，建议 22 或更新的受支持版本）和 npm**，
+不携带 Windows 的 `node.exe`。Windows 仍然携带 Node/npm，安装后的使用方式不变。
+Linux 的「依赖管理」调用系统 npm；只运行工具时不要求 npm，安装/卸载依赖时需要。
+
+除了 Node/npm 和 Rust 工具链，Linux 开发构建还需要 WebKitGTK、GTK 和托盘相关依赖。
+Ubuntu 22.04/24.04 可先安装：
+
+```bash
+sudo apt update
+sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
+  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils
+
+node --version
+npm --version
+rustc --version
+
+npm ci
+npm run tauri dev
+```
+
+其他发行版请按 [Tauri 官方 Linux 环境说明](https://v2.tauri.app/start/prerequisites/#linux)
+安装对应依赖。桌面应用需要图形会话；全局快捷键等桌面功能还取决于桌面环境支持。
+
+如果 Node 由 nvm 等工具安装，终端与桌面启动器的 PATH 可能不同。平台启动宿主时按以下顺序
+探测 Node，并校验版本（低于 18 会被跳过）：`TOOL_PLATFORM_NODE` → PATH 上的 `node` →
+`/usr/local/bin`、`/usr/bin`、`/opt/node/bin` → `~/.nvm/versions/node/*/bin/node`（新版本优先）。
+设置了 `TOOL_PLATFORM_NODE` 时只认它，不再回退——位置由你指定，静默换一个 Node 反而更难排查。
+npm 优先取该 Node 同目录的那一个，找不到时再查 PATH；找不到 npm 只会让依赖安装报错，
+不会阻止已有工具运行。探测失败时错误信息会列出每个候选的失败原因。
+
+```bash
+# Linux 构建 .deb 和 .AppImage（在 Linux 上执行）
+npm run build:release
+# 或 npm run build:linux
+```
+
+Linux 专属配置位于 `src-tauri/tauri.linux.conf.json`，覆盖资源列表，排除 Windows Node/npm。
+`.deb` 声明了 Node.js、npm 和 xdg-utils 的包依赖；AppImage 使用者需自行提供系统 Node/npm，
+因此该 AppImage 不是内置 Node 的独立运行包。产物位于
+`src-tauri/target/release/bundle/deb/` 和 `src-tauri/target/release/bundle/appimage/`。
+
+Windows 上 `npm run build:release` 仍生成 NSIS 安装包，`npm run build:nsis` 保持原样。
+
+Linux 工具及 npm 命令各自使用独立进程组；停止工具或关闭宿主时会清理该组的子进程。
+应用退出和宿主重启还会用 `/proc` 枚举子进程兜底清理：优先读
+`/proc/<pid>/task/*/children`，该文件不可用（内核未开 `CONFIG_PROC_CHILDREN`、或受
+`hidepid` 限制）时退回全量扫描 `/proc/*/stat` 按 ppid 建树，再从叶子往上逐层终止。
+停止工具会等到进程真正退出（最长 2 秒）才返回，避免旧端口未释放就重启。
+小工具若自行创建了脱离原进程组的后台服务，应在自己的退出逻辑中负责停止它。
+
+Linux 与 Windows 可共享普通 HTML/Node.js 小工具源码；含 PowerShell、Windows 系统 API
+或 Windows 专用路径的工具需要另行适配。迁移含原生模块的依赖时，请在 Linux 下重新安装
+`node_modules`，不要直接复制 Windows 的版本。
+
 ## 编写你的第一个工具
 
-每个工具是一个目录，放在 **用户数据目录的 `toolbox/`** 下（Windows：`%APPDATA%\com.tools.platform\toolbox`）：
+每个工具是一个目录，放在 **用户数据目录的 `toolbox/`** 下：
+
+- Windows：`%APPDATA%\com.tools.platform\toolbox\`
+- Linux 默认：`~/.local/share/com.tools.platform/toolbox/`
+- Linux 设置 `XDG_DATA_HOME` 时：`$XDG_DATA_HOME/com.tools.platform/toolbox/`
+
+可通过「新建 → 打开工具目录」直接定位，目录会在宿主首次启动时创建。
 
 ```
 toolbox/my-tool/
@@ -210,8 +273,12 @@ server.start();        // 自动监听 process.env.TOOL_PORT
 
 ## 开发自测
 
+时间检测与 Windows / Linux 校准工具见 [`example/time-sync`](./example/time-sync/README.md)，零第三方 npm 依赖，支持 NTP 多源共识与 HTTPS 秒级兜底。可直接执行 `node example/time-sync/app.js`，或复制到平台的 `toolbox/` 后使用；自动识别系统，无法识别时由用户确认，检测或校准失败时显示对应系统的处理方法。使用 `npm run test:time` 运行其回归测试（不会修改系统时间）。
+
 ```bash
 npm run test:host     # 宿主回归测试（真实进程跑完整流程，无需 Tauri）
+npm run test:platform # 平台资源、真实进程树清理、本地 npm 包安装/卸载（Windows / Linux）
+npm run test:tools    # 小工具适配：剪贴板、端口进程、旧数据路径
 npm run test:p2p      # p2p-chat 浏览器回归测试（真实 Chromium + Trystero 桩模块）
 cd src-tauri && cargo test   # URL 白名单等单元测试
 ```
@@ -219,6 +286,11 @@ cd src-tauri && cargo test   # URL 白名单等单元测试
 `test:host` 覆盖「端口 ↔ 存储」不变量、URL 工具识别、本地网页工具、
 端口冲突决策流程、残留数据清理等 —— 这几条断言都实际抓出过 bug，
 改 `host.js` 后请务必跑一遍。
+
+Linux 适配的验证命令为 `npm run test:host`、`npm run test:platform`、`npm run build`
+和 `cd src-tauri && cargo test --locked`。Linux 的 Rust 测试还会验证宿主与独立工具进程组
+能够一起被回收。两种系统应分别执行；Windows 上通过这些检查不能替代 Linux 的实机验证。
+本仓库未包含 CI 配置文件，两种平台需要各自在本地或自建流水线上执行上述命令。
 
 `test:p2p` 覆盖 p2p-chat 的文件名/metadata、下载保存提示与进度、另存为回退、拖拽发送。
 它存在的理由是：**Trystero 会把 `metadata` 再包一层**再交给 `onMessage`
@@ -234,7 +306,7 @@ cd src-tauri && cargo test   # URL 白名单等单元测试
 
 ```
 Vue3 前端 ──invoke──▶ Rust(Tauri) ──HTTP(127.0.0.1)──▶ Node 宿主(host.js)
-                                                          │  spawn 每工具一个 node.exe
+                                                          │  spawn 每工具一个 Node 进程
                                      iframe 直接加载 ◀────┘ 监听固定端口（记在 ports.json）
 ```
 

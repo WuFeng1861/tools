@@ -75,6 +75,11 @@
         if (j.ok) {
           state.items = j.data.items;
           state.settings = j.data.settings;
+          var status = j.data.clipboard || {};
+          var statusEl = $("notice");
+          statusEl.textContent = status.error ? status.error + (status.hint ? " " + status.hint : "") : "";
+          statusEl.style.display = status.error ? "block" : "none";
+          $("sSource").disabled = status.sourceApp === false;
           renderRow();
           renderSettings();
         }

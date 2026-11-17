@@ -1,6 +1,6 @@
-//! 工具宿主（node.exe + host.js）的生命周期管理。
+//! 工具宿主（Node.js + host.js）的生命周期管理。
 //!
-//! node.exe 作为普通 resource 打包，用 std::process::Command 启动宿主进程，
+//! Windows 使用内置 node.exe，Linux 使用系统 Node；用 std::process::Command 启动宿主进程，
 //! 通过宿主 HTTP 端口通信；以 HTTP /health 探测存活，调用失败时自动重启自愈。
 
 use std::fs;
@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use crate::processes::kill_tree as kill_pid;
 use tauri::{AppHandle, Manager};
 
 /// 平台运行时状态（宿主进程相关）
@@ -87,10 +88,11 @@ impl Sidecar {
             .path()
             .resource_dir()
             .map_err(|e| format!("获取资源目录失败: {e}"))?;
-        let node = clean_path(&resource_dir.join("resources").join("bin").join("node.exe"));
+        let node = node_executable(&resource_dir)?;
         let host_js = clean_path(&resource_dir.join("resources").join("host").join("host.js"));
         let runtime_dir = clean_path(&resource_dir.join("resources").join("runtime"));
         let templates_dir = clean_path(&resource_dir.join("resources").join("templates"));
+        #[cfg(not(target_os = "linux"))]
         let npm_cli = clean_path(
             &resource_dir
                 .join("resources")
@@ -100,7 +102,7 @@ impl Sidecar {
         );
         if !node.exists() || !host_js.exists() {
             return Err(format!(
-                "运行时资源缺失（node.exe={} host.js={}）\n请先执行 node scripts/fetch-node.mjs 准备资源",
+                "运行时资源缺失（Node.js={} host.js={}）\n请检查安装资源；Windows 可先执行 node scripts/fetch-node.mjs 准备资源",
                 node.exists(),
                 host_js.exists(),
             ));
@@ -116,11 +118,17 @@ impl Sidecar {
             runtime_dir.to_string_lossy().into_owned(),
             "--templates".into(),
             templates_dir.to_string_lossy().into_owned(),
-            "--npm-cli".into(),
-            npm_cli.to_string_lossy().into_owned(),
             "--instance-id".into(),
             instance_id,
         ]);
+        // Linux 使用系统 npm；Windows 仍使用内置 npm-cli.js，无需用户安装 Node/npm。
+        #[cfg(not(target_os = "linux"))]
+        cmd.args(["--npm-cli".into(), npm_cli.to_string_lossy().into_owned()]);
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
         // Windows 下隐藏控制台窗口（CREATE_NO_WINDOW）
         #[cfg(windows)]
         {
@@ -187,17 +195,83 @@ async fn host_alive(port: u16) -> bool {
         .unwrap_or(false)
 }
 
-/// Windows 下终止进程（含子进程树），忽略错误
-fn kill_pid(pid: u32) {
-    #[cfg(windows)]
+/// Windows 保持内置 Node；Linux 解析系统 Node 的绝对路径。
+///
+/// Linux 从图形启动器拉起时 PATH 往往很短（多数桌面只有 /usr/local/bin:/usr/bin:/bin），
+/// nvm 之类装在用户目录下的 Node 就找不到。所以依次尝试：
+/// TOOL_PLATFORM_NODE → PATH 上的 node → 常见安装路径 → nvm 的版本目录（新版本优先）。
+fn node_executable(resource_dir: &Path) -> Result<PathBuf, String> {
+    #[cfg(not(target_os = "linux"))]
     {
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW，避免弹黑框
-        let _ = cmd.output();
+        Ok(clean_path(&resource_dir.join("resources").join("bin").join("node.exe")))
     }
-    let _ = pid;
+    #[cfg(target_os = "linux")]
+    {
+        let _ = resource_dir;
+        let mut errors = Vec::new();
+        for candidate in node_candidates() {
+            match probe_node(&candidate) {
+                Ok(path) => return Ok(path),
+                Err(e) => errors.push(format!("{}：{e}", candidate.display())),
+            }
+        }
+        Err(format!(
+            "未找到可用的系统 Node.js（需要 18 或更新版本）。尝试过：\n{}\n\
+             请安装 Node.js，或设置 TOOL_PLATFORM_NODE 为 node 的绝对路径后重启平台。",
+            errors.join("\n")
+        ))
+    }
+}
+
+/// Linux 上按优先级列出 Node 候选。
+#[cfg(target_os = "linux")]
+fn node_candidates() -> Vec<PathBuf> {
+    // 显式指定时只用它：用户既然指明了位置，静默回退到别的 Node 反而更难排查。
+    if let Some(explicit) = std::env::var_os("TOOL_PLATFORM_NODE") {
+        return vec![PathBuf::from(explicit)];
+    }
+    let mut list = vec![PathBuf::from("node")];
+    for path in ["/usr/local/bin/node", "/usr/bin/node", "/opt/node/bin/node"] {
+        list.push(PathBuf::from(path));
+    }
+    // nvm 把版本装在 $HOME/.nvm/versions/node/<版本>/bin/node；按名字倒序让新版本先试，
+    // 版本号不满足要求的会被 probe_node 跳过，所以顺序只影响「多个可用版本选谁」。
+    if let Some(home) = std::env::var_os("HOME") {
+        let versions = Path::new(&home).join(".nvm").join("versions").join("node");
+        if let Ok(entries) = std::fs::read_dir(&versions) {
+            let mut dirs: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+            dirs.sort();
+            list.extend(dirs.into_iter().rev().map(|dir| dir.join("bin").join("node")));
+        }
+    }
+    list
+}
+
+/// 让候选 Node 自报真实路径与版本，顺便验证它能跑且版本够新。
+#[cfg(target_os = "linux")]
+fn probe_node(candidate: &Path) -> Result<PathBuf, String> {
+    let output = std::process::Command::new(candidate)
+        .args(["-p", "process.execPath + '\\n' + process.versions.node"])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("执行失败".into());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let path = PathBuf::from(text.lines().next().unwrap_or("").trim());
+    let version = text.lines().nth(1).unwrap_or("").trim().to_string();
+    if !path.is_absolute() || !path.is_file() {
+        return Err("返回的 Node 路径无效".into());
+    }
+    let major = version
+        .split('.')
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+    if major < 18 {
+        return Err(format!("版本过低（{version}，需要 18 及以上）"));
+    }
+    Ok(path)
 }
 
 /// 对宿主端口发一次 HTTP 请求（不管理宿主生命周期）

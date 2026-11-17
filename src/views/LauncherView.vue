@@ -259,7 +259,7 @@ onUnmounted(() => {
   document.removeEventListener("click", onDocClick);
 });
 
-/** 在文件管理器中打开工具箱保存目录（%APPDATA%\com.tools.platform\toolbox） */
+/** 在系统文件管理器中打开当前用户的工具箱保存目录。 */
 async function openToolbox() {
   try {
     await api.openToolDir();

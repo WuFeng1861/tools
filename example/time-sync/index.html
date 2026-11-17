@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
+  <title>时间检测与校准</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/front.js"></script>
+</head>
+<body>
+  <button type="button" class="theme-toggle" id="theme-toggle" title="主题：自动（点击切换）" aria-label="主题：自动（点击切换）">🌗</button>
+  <main class="app">
+    <header class="header">
+      <div class="brand"><span class="brand-icon" aria-hidden="true">◷</span><div><h1>时间检测与校准</h1><p>多源核对 · 本机校准</p></div></div>
+      <span class="platform" id="platform">正在连接本机…</span>
+    </header>
+
+    <section class="system-panel card" aria-labelledby="system-title">
+      <div class="system-head"><h2 id="system-title">电脑系统</h2><div><button type="button" class="text-button" id="redetect-system">重新识别</button><button type="button" class="text-button" id="show-help">查看处理方法</button></div></div>
+      <p id="system-note">正在识别运行工具的电脑系统…</p>
+      <div class="system-choice" id="system-choice" hidden><label for="system-select">请选择运行本工具的电脑系统</label><select id="system-select"><option value="">请选择…</option><option value="win32">Windows</option><option value="linux">Linux</option></select><button type="button" class="secondary" id="confirm-system">确认系统</button></div>
+    </section>
+
+    <section class="overview card" aria-labelledby="overview-title">
+      <div class="overview-main">
+        <span class="eyebrow">SYSTEM CLOCK / 本机时间</span>
+        <h2 id="overview-title">每一秒，都心中有数。</h2>
+        <p class="intro">对比国内外时间源，看看这台电脑快了还是慢了。</p>
+        <div class="offset-line"><span id="offset" class="offset">—</span><span id="offset-unit">等待检测</span></div>
+        <p id="direction" class="direction">点击开始检测，获取本机与网络时间的偏差。</p>
+        <div class="actions">
+          <button type="button" class="primary" id="detect">开始检测 <span aria-hidden="true">↗</span></button>
+          <button type="button" class="secondary" id="sync" disabled>校准系统时间</button>
+        </div>
+        <p class="action-note" id="action-note">确认电脑系统后，显示对应的校准方式。</p>
+        <label class="coarse-option" id="coarse-option" hidden><input type="checkbox" id="allow-coarse"> 允许 HTTPS 秒级粗略校准（无法达到 NTP 精度）</label>
+      </div>
+      <div class="clock-panel">
+        <div class="analog" aria-hidden="true"><svg viewBox="0 0 180 180"><circle class="dial" cx="90" cy="90" r="79"/><path class="ticks" d="M90 20v9M90 151v9M20 90h9M151 90h9M55 29l4 7M121 144l4 7M29 55l7 4M144 121l7 4M29 125l7-4M144 59l7-4M55 151l4-7M121 36l4-7"/><line id="hour-hand" class="hour-hand" x1="90" y1="90" x2="90" y2="53"/><line id="minute-hand" class="minute-hand" x1="90" y1="90" x2="90" y2="35"/><line id="second-hand" class="second-hand" x1="90" y1="104" x2="90" y2="32"/><circle class="pin" cx="90" cy="90" r="4"/></svg></div>
+        <div class="digital" id="local-time">--:--:--</div>
+        <div class="clock-date" id="local-date">—</div>
+        <div class="reference"><span>网络参考时间</span><strong id="reference-time">等待测量</strong></div>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+
+    <section class="help card" id="help" hidden aria-labelledby="help-title"><div class="section-head"><div><h2 id="help-title">处理方法</h2><p id="help-note"></p></div><button type="button" class="text-button" id="hide-help">收起</button></div><div id="help-commands"></div></section>
+
+    <section class="stats" aria-label="检测摘要">
+      <div><span>测量方式</span><strong id="method">NTP 优先</strong><small id="method-note">HTTPS 自动兜底</small></div>
+      <div><span>独立来源共识</span><strong id="agreement">—</strong><small id="agreement-note">至少两个独立来源</small></div>
+      <div><span>估计不确定度</span><strong id="uncertainty">—</strong><small>受链路延迟和源差异影响</small></div>
+      <div><span>最近检测</span><strong id="checked-at">尚未检测</strong><small id="duration">手动检测，按需校准</small></div>
+    </section>
+
+    <section class="sources card" aria-labelledby="sources-title">
+      <div class="section-head"><div><h2 id="sources-title">时间源</h2><p>国内与全球节点并行检测，单个源不可用时继续尝试其他来源。</p></div><span class="badge" id="source-count">10 个可选源</span></div>
+      <div class="table-wrap"><table><thead><tr><th scope="col">来源 / 地址</th><th scope="col">协议</th><th scope="col">时间偏差 <span title="正数表示本机慢，负数表示本机快">ⓘ</span></th><th scope="col">往返延迟</th><th scope="col">状态</th></tr></thead><tbody id="source-rows"></tbody></table></div>
+      <div class="table-footer"><span class="status-dot"></span><span id="sources-footer">尚未发送网络请求</span></div>
+    </section>
+
+    <details class="settings card" id="settings"><summary>检测设置 <span>选择时间源、采样次数与超时</span></summary>
+      <div class="settings-body">
+        <div class="form-row"><label>每个 NTP 源采样 <select id="samples"><option value="1">1 次 · 快速</option><option value="2" selected>2 次 · 推荐</option><option value="3">3 次 · 多次核对</option></select></label><label>单次请求超时 <select id="timeout"><option value="1500">1.5 秒</option><option value="2500" selected>2.5 秒</option><option value="5000">5 秒</option></select></label><label class="check-label"><input type="checkbox" id="https-fallback" checked> NTP 不足时使用 HTTPS 兜底</label></div>
+        <div id="source-options" class="source-options"></div>
+        <p class="fine-print">同一服务商的备用域名只计为一个独立来源。HTTPS Date 为秒级时间，可能受网页缓存影响；它与 NTP 分开估计。所有来源都不可达时会显示失败原因，无法保证任何网络均可访问。</p>
+      </div>
+    </details>
+
+    <footer class="footer"><span>以 UTC 计算，按本机时区显示 · <span id="timezone">—</span></span><span>校准后自动复测</span></footer>
+  </main>
+</body>
+</html>
